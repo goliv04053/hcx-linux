@@ -91,8 +91,13 @@ def list_select(win, prompt, lines, multiple=False):
 
 def popup_menu(view, items, h, v):
     """Pop-up menu at card point (h, v). Returns (line, subitem) 1-based or None."""
-    pop = Gtk.Popover(has_arrow=False)
-    pop.set_parent(view)
+    # One popover per view, reused: unparenting a popover right after it
+    # closes makes GTK crash on the next pointer motion (destroyed surface).
+    pop = getattr(view, "_hcx_popover", None)
+    if pop is None:
+        pop = Gtk.Popover(has_arrow=False)
+        pop.set_parent(view)
+        view._hcx_popover = pop
     z = getattr(view, "zoom", 1.0)
     r = Gdk.Rectangle()
     r.x, r.y, r.width, r.height = int(h * z), int(v * z), 1, 1
@@ -127,11 +132,13 @@ def popup_menu(view, items, h, v):
             result.append(row._pick)
             pop.popdown()
         lb.connect("row-activated", activated)
-        pop.connect("closed", lambda *_: done(result[0] if result else None))
+        handler.append(pop.connect("closed", lambda *_: done(result[0] if result else None)))
+    handler = []
     try:
         return run_modal(pop.popup, connect)
     finally:
-        GLib.idle_add(pop.unparent)
+        for hid in handler:
+            pop.disconnect(hid)
 
 
 # -- floating script windows ------------------------------------------------------------------

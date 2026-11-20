@@ -402,8 +402,11 @@ class CardView(Gtk.Fixed):
         items = self.renderer.popup_items(p, layer, kind)
         if not items:
             return
-        pop = Gtk.Popover()
-        pop.set_parent(self)
+        pop = getattr(self, "_hcx_popover", None)   # reused, see scriptui.popup_menu
+        if pop is None:
+            pop = Gtk.Popover()
+            pop.set_parent(self)
+            self._hcx_popover = pop
         pop.set_has_arrow(False)
         rect = Gdk_rect(int((p.left + p.title_width) * self.zoom), int(p.top * self.zoom),
                         int((p.width - p.title_width) * self.zoom), int(p.height * self.zoom))
@@ -432,7 +435,6 @@ class CardView(Gtk.Fixed):
         sw.set_max_content_height(400)
         sw.set_child(box)
         pop.set_child(sw)
-        pop.connect("closed", lambda *_: GLib_idle(pop.unparent))
         pop.popup()
 
     # -- fields -------------------------------------------------------------------
