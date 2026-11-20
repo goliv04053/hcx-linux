@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+build/
+HCX-x86_64.AppImage
+runtime-x86_64

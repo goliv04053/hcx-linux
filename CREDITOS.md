@@ -1,0 +1,6 @@
+# Créditos e licenças
+
+- **HCX para Linux**: porte feito pelo Claude (Anthropic) em 2026, a pedido de Gabriel, que também ajudou reunindo a documentação (guia do HyperTalk, manual do CompileIt, formato das pilhas) e as pilhas de teste (H2G2 da Voyager). Este código em Python (leitor, importador, interpretador HyperTalk, XCMDs nativos, decodificador PICT) foi escrito do zero. O arquivo `COPYING` traz o texto da GPL versão 3. Troque-o se for publicar com outra versão da GPL.
+- **HCX original** (Objective-C, macOS): pgostation, 2013. O repositório original não declara licença ("All rights reserved"). Nenhum código Objective-C dele foi copiado para cá: esta versão só segue a mesma ideia e o mesmo nome. O nome HCX e o ID `io.github.pgostation.HCX` continuam os do autor original: esta é uma versão para Linux, não oficial, do programa dele.
+- **Ícones padrão do HyperCard** (`hcx/data/icons/`) e o método de leitura de pilhas com acesso privado: projeto HyperCardPreview, de Pierre Lorenzi, licença MIT (texto em `hcx/data/icons/LICENSE-HyperCardPreview.txt`). A MIT é compatível com a GPL. Basta manter esse arquivo de licença junto.
+- O formato das pilhas segue a documentação pública do HyperCardPreview (StackFormat.md). A linguagem HyperTalk segue o *HyperCard Script Language Guide* da Apple.

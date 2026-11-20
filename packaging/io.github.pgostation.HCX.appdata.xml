@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.pgostation.HCX</id>
+  <name>HCX</name>
+  <summary>HyperCard stack reader</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <description>
+    <p>HCX opens classic Macintosh HyperCard stacks (also inside MacBinary, BinHex, AppleDouble files and HFS disk images) and lets you browse their cards, buttons and fields. Linux port of pgostation's HCX.</p>
+  </description>
+  <launchable type="desktop-id">io.github.pgostation.HCX.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+</component>

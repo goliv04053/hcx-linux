@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <pattern id="dots" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="4" fill="#fff"/>
+      <rect width="2" height="2" fill="#000"/>
+      <rect x="2" y="2" width="2" height="2" fill="#000"/>
+    </pattern>
+  </defs>
+  <rect x="26" y="14" width="88" height="66" rx="6" fill="#fff" stroke="#1c1c1c" stroke-width="4" transform="rotate(8 70 47)"/>
+  <rect x="20" y="24" width="88" height="66" rx="6" fill="#fff" stroke="#1c1c1c" stroke-width="4" transform="rotate(3 64 57)"/>
+  <rect x="14" y="36" width="92" height="70" rx="6" fill="#fff" stroke="#1c1c1c" stroke-width="4"/>
+  <rect x="22" y="44" width="76" height="12" fill="url(#dots)" stroke="#1c1c1c" stroke-width="2"/>
+  <rect x="24" y="66" width="34" height="16" rx="7" fill="#fff" stroke="#1c1c1c" stroke-width="3"/>
+  <rect x="64" y="66" width="34" height="16" rx="7" fill="#1c1c1c"/>
+  <path d="M28 92h64" stroke="#1c1c1c" stroke-width="3" stroke-dasharray="3 3"/>
+  <g transform="translate(74 76)">
+    <path d="M14 2c2.5 0 4 1.6 4 4v16l3-1c2.5-.5 4.5.3 5 2.5l.2 1.2 2.6-.6c2.4-.4 4.3.6 4.7 2.8l.2 1.1 2.1-.3c2.5-.2 4.2 1 4.2 3.4V44c0 8-5 14-13 14h-6c-6 0-9-3-12-8l-8-13c-1.4-2.3-.8-4.6 1.3-5.6 2-1 4-.3 5.4 1.6L10 38V6c0-2.4 1.5-4 4-4z" fill="#fff" stroke="#1c1c1c" stroke-width="3" stroke-linejoin="round"/>
+  </g>
+</svg>
