@@ -22,6 +22,12 @@ sudo dnf install python3-gobject gtk4 libadwaita
 
 Se o AppImage reclamar de FUSE (raro no Fedora), rode `./HCX-x86_64.AppImage --appimage-extract-and-run`.
 
+## Idiomas
+
+A interface do HCX está em **português, inglês e espanhol**. Ela segue o idioma do sistema. Para trocar sem mexer no sistema, use o menu ☰ → **Idioma**. A escolha fica salva e vale quando o programa reinicia, e o aviso que aparece já tem o botão "Reiniciar agora".
+
+As traduções são arquivos `.po` comuns, na pasta `hcx/locale/`. Qualquer pessoa pode traduzir para outro idioma com o Poedit ou outro editor de traduções. O passo a passo, em inglês e português, está em [TRANSLATING.md](TRANSLATING.md).
+
 ## O que ele abre
 
 - Pilhas HyperCard 1.x e 2.x, inclusive as protegidas com "acesso privado"

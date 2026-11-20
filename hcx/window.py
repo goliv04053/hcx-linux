@@ -10,7 +10,8 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
 
 from . import macfiles
 from .cardview import CardView
-from .i18n import _
+from . import i18n
+from .i18n import N_, _
 from .inspector import Inspector
 from . import scriptui
 from .hthost import HostMixin
@@ -19,8 +20,8 @@ from .model import Content, read_xml, write_xml
 from .stackimport import import_stack
 
 ZOOMS = [1.0, 1.5, 2.0, 3.0, 4.0]
-PROGRESS_LABELS = {"resources": "Reading resources…", "bg": "Reading backgrounds…",
-                   "card": "Reading cards…", "xml": "Writing package…", "done": "Loading…"}
+PROGRESS_LABELS = {"resources": N_("Reading resources…"), "bg": N_("Reading backgrounds…"),
+                   "card": N_("Reading cards…"), "xml": N_("Writing package…"), "done": N_("Loading…")}
 
 
 class HCXWindow(Adw.ApplicationWindow, HostMixin):
@@ -93,11 +94,18 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         s2.append(_("Reimport Stack"), "win.reimport")
         s2.append(_("Export Package…"), "win.export")
         menu.append_section(None, s2)
+        langs = Gio.Menu()
+        langs.append(_("System Default"), "app.language::")
+        for code in i18n.available_languages():
+            langs.append(i18n.language_name(code), "app.language::" + code)
+        s25 = Gio.Menu()
+        s25.append_submenu(_("Language"), langs)
+        menu.append_section(None, s25)
         s3 = Gio.Menu()
         s3.append(_("About HCX"), "app.about")
         s3.append(_("Quit"), "app.quit")
         menu.append_section(None, s3)
-        mb = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu")
+        mb = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text=_("Menu"))
         mb.set_primary(True)
         hb.pack_end(mb)
         self.insp_btn = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic", tooltip_text=_("Inspector"))
@@ -1062,7 +1070,7 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         self.pages.set_visible_child_name("card" if self.stack else "welcome")
         self._update_actions()
         dlg = Adw.AlertDialog(heading="HCX", body=msg)
-        dlg.add_response("ok", "OK")
+        dlg.add_response("ok", _("OK"))
         dlg.present(self)
 
     def open_path(self, path):

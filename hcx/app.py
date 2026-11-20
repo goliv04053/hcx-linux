@@ -14,10 +14,12 @@ gi.require_version("Pango", "1.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
+from . import i18n  # noqa: E402
 from .i18n import _  # noqa: E402
 
 APP_ID = "io.github.pgostation.HCX"
 VERSION = "3.0"
+RESTART = False
 
 CSS = """
 .hcx-card { box-shadow: 0 1px 4px 1px alpha(black, 0.35); background: white; }
@@ -51,6 +53,11 @@ class HCXApp(Adw.Application):
                 self.set_accels_for_action("app." + name, list(accels))
 
         act("new-window", lambda *a: self.new_window().present(), ["<Ctrl>n"])
+        lang = Gio.SimpleAction.new_stateful("language", GLib.VariantType.new("s"),
+                                             GLib.Variant.new_string(i18n.saved_language()))
+        lang.connect("change-state", self._set_language)
+        self.add_action(lang)
+        act("restart", self._restart)
         act("about", self._about)
         act("quit", lambda *a: self.quit(), ["<Ctrl>q"])
         for action, accels in (("win.open", ["<Ctrl>o"]), ("win.close", ["<Ctrl>w"]),
@@ -84,6 +91,31 @@ class HCXApp(Adw.Application):
             if f.get_path():
                 w.open_path(f.get_path())
 
+    def _set_language(self, action, value):
+        code = value.get_string()
+        action.set_state(value)
+        i18n.save_language(code)
+        win = self.get_active_window()
+        if win is not None and hasattr(win, "toasts"):
+            t = Adw.Toast(title=i18n.translate_to(code, i18n.N_("The new language is used after HCX restarts.")),
+                          button_label=i18n.translate_to(code, i18n.N_("Restart Now")), action_name="app.restart",
+                          timeout=8)
+            win.toasts.add_toast(t)
+
+    def _restart(self, *a):
+        """Close every window (they ask about unsaved changes), then start again."""
+        global RESTART
+        RESTART = True
+        for w in list(self.get_windows()):
+            w.close()
+
+        def check():
+            global RESTART
+            if self.get_windows():      # a window kept open (unsaved changes): no restart
+                RESTART = False
+            return False
+        GLib.timeout_add(300, check)
+
     def _about(self, *a):
         win = self.get_active_window()
         kw = dict(application_name="HCX", application_icon=APP_ID, version=VERSION,
@@ -107,4 +139,11 @@ def main(argv=None):
     if len(argv) > 1 and argv[1] in ("--version", "-V"):
         print("HCX", VERSION)
         return 0
-    return HCXApp().run(argv)
+    if i18n.LANG != "en" or i18n.saved_language() == "en":
+        # GTK's own texts (file chooser, About window…) follow the chosen language too
+        base = i18n.LANG.split("_")[0]
+        os.environ["LANGUAGE"] = i18n.LANG + (":" + base if base != i18n.LANG else "")
+    rc = HCXApp().run(argv)
+    if RESTART and getattr(sys, "orig_argv", None):
+        os.execv(sys.executable, list(sys.orig_argv))
+    return rc

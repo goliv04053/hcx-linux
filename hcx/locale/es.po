@@ -1,0 +1,524 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: HCX\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+
+#: hcx/app.py:100
+msgid "The new language is used after HCX restarts."
+msgstr "El nuevo idioma se usará cuando HCX se reinicie."
+
+#: hcx/app.py:101
+msgid "Restart Now"
+msgstr "Reiniciar ahora"
+
+#: hcx/app.py:122
+msgid "A HyperCard stack reader for Linux"
+msgstr "Un lector de pilas de HyperCard para Linux"
+
+#: hcx/inspector.py:23
+msgid "(no script)"
+msgstr "(sin script)"
+
+#: hcx/inspector.py:52
+msgid "Object"
+msgstr "Objeto"
+
+#: hcx/inspector.py:52 hcx/inspector.py:242
+msgid "Card"
+msgstr "Tarjeta"
+
+#: hcx/inspector.py:53 hcx/inspector.py:242
+msgid "Background"
+msgstr "Fondo"
+
+#: hcx/inspector.py:53
+msgid "Stack"
+msgstr "Pila"
+
+#: hcx/inspector.py:134
+msgid "Script"
+msgstr "Script"
+
+#: hcx/inspector.py:159 hcx/inspector.py:217
+msgid "Cards"
+msgstr "Tarjetas"
+
+#: hcx/inspector.py:160
+msgid "Backgrounds"
+msgstr "Fondos"
+
+#: hcx/inspector.py:161
+msgid "Card Size"
+msgstr "Tamaño de la tarjeta"
+
+#: hcx/inspector.py:162
+msgid "Format"
+msgstr "Formato"
+
+#: hcx/inspector.py:164
+msgid "Created by"
+msgstr "Creada con"
+
+#: hcx/inspector.py:166
+msgid "Last modified by"
+msgstr "Modificada por última vez con"
+
+#: hcx/inspector.py:167
+msgid "Text encoding"
+msgstr "Codificación"
+
+#: hcx/inspector.py:168
+msgid "User level"
+msgstr "Nivel de usuario"
+
+#: hcx/inspector.py:170
+msgid "Can't modify"
+msgstr "No se puede modificar"
+
+#: hcx/inspector.py:172
+msgid "Private access"
+msgstr "Acceso privado"
+
+#: hcx/inspector.py:174
+msgid "Original file"
+msgstr "Archivo original"
+
+#: hcx/inspector.py:180
+msgid "Resources"
+msgstr "Recursos"
+
+#: hcx/inspector.py:181
+msgid "Icons"
+msgstr "Iconos"
+
+#: hcx/inspector.py:181 hcx/inspector.py:188
+msgid "Sounds"
+msgstr "Sonidos"
+
+#: hcx/inspector.py:181
+msgid "Pictures"
+msgstr "Imágenes"
+
+#: hcx/inspector.py:182
+msgid "Externals (XCMD/XFCN)"
+msgstr "Externos (XCMD/XFCN)"
+
+#: hcx/inspector.py:194
+msgid "Play"
+msgstr "Reproducir"
+
+#: hcx/inspector.py:199
+msgid "compressed sound, not converted"
+msgstr "sonido comprimido, no convertido"
+
+#: hcx/inspector.py:210 hcx/inspector.py:243
+msgid "Name"
+msgstr "Nombre"
+
+#: hcx/inspector.py:211 hcx/inspector.py:244
+msgid "ID"
+msgstr "ID"
+
+#: hcx/inspector.py:214
+msgid "Marked"
+msgstr "Marcada"
+
+#: hcx/inspector.py:218
+msgid "Show picture"
+msgstr "Mostrar imagen"
+
+#: hcx/inspector.py:219
+msgid "Can't delete"
+msgstr "No se puede borrar"
+
+#: hcx/inspector.py:220
+msgid "Don't search"
+msgstr "No buscar"
+
+#: hcx/inspector.py:222
+msgid "Parts"
+msgstr "Objetos"
+
+#: hcx/inspector.py:222 hcx/window.py:119
+msgid "Buttons"
+msgstr "Botones"
+
+#: hcx/inspector.py:223 hcx/window.py:119
+msgid "Fields"
+msgstr "Campos"
+
+#: hcx/inspector.py:234
+msgid "Select a button or field with the Button or Field tool."
+msgstr "Selecciona un botón o un campo con la herramienta Botón o Campo."
+
+#: hcx/inspector.py:241
+msgid "Button"
+msgstr "Botón"
+
+#: hcx/inspector.py:241
+msgid "Field"
+msgstr "Campo"
+
+#: hcx/inspector.py:246 hcx/inspector.py:213
+msgid "Number"
+msgstr "Número"
+
+#: hcx/inspector.py:248
+msgid "Style"
+msgstr "Estilo"
+
+#: hcx/inspector.py:249
+msgid "Visible"
+msgstr "Visible"
+
+#: hcx/inspector.py:251
+msgid "Enabled"
+msgstr "Activado"
+
+#: hcx/inspector.py:252
+msgid "Show name"
+msgstr "Mostrar nombre"
+
+#: hcx/inspector.py:253
+msgid "Auto highlight"
+msgstr "Resaltado automático"
+
+#: hcx/inspector.py:254
+msgid "Highlight"
+msgstr "Resaltado"
+
+#: hcx/inspector.py:256
+msgid "Shared highlight"
+msgstr "Resaltado compartido"
+
+#: hcx/inspector.py:257
+msgid "Family"
+msgstr "Familia"
+
+#: hcx/inspector.py:258
+msgid "Icon"
+msgstr "Icono"
+
+#: hcx/inspector.py:260
+msgid "Lock text"
+msgstr "Bloquear texto"
+
+#: hcx/inspector.py:261
+msgid "Don't wrap"
+msgstr "No ajustar líneas"
+
+#: hcx/inspector.py:263
+msgid "Shared text"
+msgstr "Texto compartido"
+
+#: hcx/inspector.py:264
+msgid "Fixed line height"
+msgstr "Altura de línea fija"
+
+#: hcx/inspector.py:265
+msgid "Show lines"
+msgstr "Mostrar líneas"
+
+#: hcx/inspector.py:266
+msgid "Wide margins"
+msgstr "Márgenes anchos"
+
+#: hcx/inspector.py:269
+msgid "Position and Size"
+msgstr "Posición y tamaño"
+
+#: hcx/inspector.py:280
+msgid "Left"
+msgstr "Izquierda"
+
+#: hcx/inspector.py:281
+msgid "Top"
+msgstr "Arriba"
+
+#: hcx/inspector.py:282
+msgid "Width"
+msgstr "Ancho"
+
+#: hcx/inspector.py:283
+msgid "Height"
+msgstr "Alto"
+
+#: hcx/inspector.py:286
+msgid "Text"
+msgstr "Texto"
+
+#: hcx/inspector.py:290
+msgid "Font"
+msgstr "Fuente"
+
+#: hcx/inspector.py:291
+msgid "Size"
+msgstr "Tamaño"
+
+#: hcx/inspector.py:292
+msgid "Line height"
+msgstr "Altura de línea"
+
+#: hcx/inspector.py:293
+msgid "Alignment"
+msgstr "Alineación"
+
+#: hcx/inspector.py:293
+msgid "Align left"
+msgstr "A la izquierda"
+
+#: hcx/inspector.py:293
+msgid "Center"
+msgstr "Centrado"
+
+#: hcx/inspector.py:293
+msgid "Align right"
+msgstr "A la derecha"
+
+#: hcx/scriptui.py:60 hcx/scriptui.py:81 hcx/window.py:953 hcx/window.py:1139
+msgid "Cancel"
+msgstr "Cancelar"
+
+#: hcx/scriptui.py:61 hcx/scriptui.py:82 hcx/window.py:1073
+msgid "OK"
+msgstr "Aceptar"
+
+#: hcx/scriptui.py:149
+msgid "Close"
+msgstr "Cerrar"
+
+#: hcx/window.py:23
+msgid "Reading resources…"
+msgstr "Leyendo recursos…"
+
+#: hcx/window.py:23
+msgid "Reading backgrounds…"
+msgstr "Leyendo fondos…"
+
+#: hcx/window.py:24
+msgid "Reading cards…"
+msgstr "Leyendo tarjetas…"
+
+#: hcx/window.py:24
+msgid "Writing package…"
+msgstr "Guardando paquete…"
+
+#: hcx/window.py:24
+msgid "Loading…"
+msgstr "Cargando…"
+
+#: hcx/window.py:63
+msgid "First Card"
+msgstr "Primera tarjeta"
+
+#: hcx/window.py:64
+msgid "Previous Card"
+msgstr "Tarjeta anterior"
+
+#: hcx/window.py:65
+msgid "Next Card"
+msgstr "Tarjeta siguiente"
+
+#: hcx/window.py:66
+msgid "Last Card"
+msgstr "Última tarjeta"
+
+#: hcx/window.py:78 hcx/window.py:59 hcx/window.py:172 hcx/window.py:1024
+msgid "Open Stack…"
+msgstr "Abrir pila…"
+
+#: hcx/window.py:79
+msgid "New Window"
+msgstr "Ventana nueva"
+
+#: hcx/window.py:80
+msgid "Save Changes"
+msgstr "Guardar cambios"
+
+#: hcx/window.py:83
+msgid "Find…"
+msgstr "Buscar…"
+
+#: hcx/window.py:84
+msgid "Print Card…"
+msgstr "Imprimir tarjeta…"
+
+#: hcx/window.py:85
+msgid "Copy Card as Image"
+msgstr "Copiar tarjeta como imagen"
+
+#: hcx/window.py:86 hcx/window.py:865
+msgid "Export Card as PNG…"
+msgstr "Exportar tarjeta como PNG…"
+
+#: hcx/window.py:90
+msgid "Automatic"
+msgstr "Automática"
+
+#: hcx/window.py:91
+msgid "Western (Mac Roman)"
+msgstr "Occidental (Mac Roman)"
+
+#: hcx/window.py:92
+msgid "Japanese (Shift-JIS)"
+msgstr "Japonés (Shift-JIS)"
+
+#: hcx/window.py:93
+msgid "Text Encoding"
+msgstr "Codificación del texto"
+
+#: hcx/window.py:94
+msgid "Reimport Stack"
+msgstr "Volver a importar la pila"
+
+#: hcx/window.py:95 hcx/window.py:1240
+msgid "Export Package…"
+msgstr "Exportar paquete .hcxs…"
+
+#: hcx/window.py:98
+msgid "System Default"
+msgstr "Predeterminado del sistema"
+
+#: hcx/window.py:102
+msgid "Language"
+msgstr "Idioma"
+
+#: hcx/window.py:105
+msgid "About HCX"
+msgstr "Acerca de HCX"
+
+#: hcx/window.py:106
+msgid "Quit"
+msgstr "Salir"
+
+#: hcx/window.py:108
+msgid "Menu"
+msgstr "Menú"
+
+#: hcx/window.py:111
+msgid "Inspector"
+msgstr "Inspector"
+
+#: hcx/window.py:119
+msgid "Browse"
+msgstr "Navegar"
+
+#: hcx/window.py:126 hcx/window.py:129
+msgid "New Button"
+msgstr "Botón nuevo"
+
+#: hcx/window.py:127 hcx/window.py:129
+msgid "New Field"
+msgstr "Campo nuevo"
+
+#: hcx/window.py:131
+msgid "Delete"
+msgstr "Borrar"
+
+#: hcx/window.py:134
+msgid "Edit Background"
+msgstr "Editar fondo"
+
+#: hcx/window.py:138 hcx/window.py:140 hcx/window.py:142
+msgid "Zoom"
+msgstr "Zoom"
+
+#: hcx/window.py:170
+msgid "Open a HyperCard Stack"
+msgstr "Abre una pila de HyperCard"
+
+#: hcx/window.py:171
+msgid "Drop a stack here, or open a stack file, a MacBinary/BinHex/AppleDouble file or an HFS disk image (.img, .dsk, .image)."
+msgstr "Arrastra una pila aquí, o abre un archivo de pila, un archivo MacBinary/BinHex/AppleDouble o una imagen de disco HFS (.img, .dsk, .image)."
+
+#: hcx/window.py:199
+msgid "Find in all cards"
+msgstr "Buscar en todas las tarjetas"
+
+#: hcx/window.py:205
+msgid "Find Next"
+msgstr "Buscar siguiente"
+
+#: hcx/window.py:403
+msgid "Card %d of %d"
+msgstr "Tarjeta %d de %d"
+
+#: hcx/window.py:826
+msgid "“%s” was not found."
+msgstr "No se encontró «%s»."
+
+#: hcx/window.py:860
+msgid "Card copied as image."
+msgstr "Tarjeta copiada como imagen."
+
+#: hcx/window.py:875
+msgid "Saved %s"
+msgstr "%s guardado"
+
+#: hcx/window.py:896
+msgid "Printing needs PyGObject's cairo support (sudo dnf install python3-gobject)."
+msgstr "Para imprimir hace falta el soporte de cairo de PyGObject (sudo dnf install python3-gobject)."
+
+#: hcx/window.py:931
+msgid "Changes saved. They stay when you open this stack again."
+msgstr "Cambios guardados. Seguirán ahí cuando vuelvas a abrir esta pila."
+
+#: hcx/window.py:951
+msgid "Save changes?"
+msgstr "¿Guardar los cambios?"
+
+#: hcx/window.py:952
+msgid "This stack has changes that were not saved."
+msgstr "Esta pila tiene cambios sin guardar."
+
+#: hcx/window.py:954
+msgid "Discard"
+msgstr "Descartar"
+
+#: hcx/window.py:955
+msgid "Save"
+msgstr "Guardar"
+
+#: hcx/window.py:1015
+msgid "Press Ctrl+S to keep your changes."
+msgstr "Pulsa Ctrl+S para conservar los cambios."
+
+#: hcx/window.py:1026
+msgid "All files"
+msgstr "Todos los archivos"
+
+#: hcx/window.py:1061
+msgid "Reading file…"
+msgstr "Leyendo el archivo…"
+
+#: hcx/window.py:1084 hcx/window.py:1115
+msgid "No HyperCard stack was found in this file."
+msgstr "No se encontró ninguna pila de HyperCard en este archivo."
+
+#: hcx/window.py:1098
+msgid "HFS+ (Mac OS Extended) disk images are not supported yet. Copy the stack out of the image first (for example with hfsplus or a Mac)."
+msgstr "Las imágenes de disco HFS+ (Mac OS Plus) todavía no son compatibles. Copia antes la pila fuera de la imagen (por ejemplo con hfsplus o en un Mac)."
+
+#: hcx/window.py:1104 hcx/window.py:1101
+msgid "Could not open the stack: %s"
+msgstr "No se pudo abrir la pila: %s"
+
+#: hcx/window.py:1125
+msgid "Choose a Stack"
+msgstr "Elige una pila"
+
+#: hcx/window.py:1125
+msgid "This disk image contains several stacks."
+msgstr "Esta imagen de disco contiene varias pilas."
+
+#: hcx/window.py:1162
+msgid "Importing…"
+msgstr "Importando…"
+
+#: hcx/window.py:1255
+msgid "Package exported to %s"
+msgstr "Paquete exportado a %s"

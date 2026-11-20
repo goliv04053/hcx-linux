@@ -58,7 +58,7 @@ def ask(win, prompt, default="", password=False):
     entry.set_activates_default(True)
     dlg.set_extra_child(entry)
     dlg.add_response("cancel", _("Cancel"))
-    dlg.add_response("ok", "OK")
+    dlg.add_response("ok", _("OK"))
     dlg.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
     dlg.set_default_response("ok")
     dlg.set_close_response("cancel")
@@ -79,7 +79,7 @@ def list_select(win, prompt, lines, multiple=False):
     sw.set_child(lb)
     dlg.set_extra_child(sw)
     dlg.add_response("cancel", _("Cancel"))
-    dlg.add_response("ok", "OK")
+    dlg.add_response("ok", _("OK"))
     dlg.set_default_response("ok")
     dlg.set_close_response("cancel")
 
