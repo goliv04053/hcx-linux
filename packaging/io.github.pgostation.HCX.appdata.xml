@@ -10,6 +10,20 @@
   <description>
     <p>HCX opens classic Macintosh HyperCard stacks (also inside MacBinary, BinHex, AppleDouble files and HFS disk images) and lets you browse their cards, buttons and fields. Linux port of pgostation's HCX.</p>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/find.png</image>
+      <caption>A stack card with its navigation palette and search results</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/inspector.png</image>
+      <caption>The object inspector</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/chapter-menu.png</image>
+      <caption>A menu made by the stack's own HyperTalk scripts</caption>
+    </screenshot>
+  </screenshots>
   <launchable type="desktop-id">io.github.pgostation.HCX.desktop</launchable>
   <content_rating type="oars-1.1"/>
 </component>

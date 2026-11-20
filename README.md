@@ -2,6 +2,21 @@
 
 HCX é um leitor de pilhas HyperCard do Mac clássico. Esta é a versão para Linux (GTK4 + libadwaita), portada do HCX original do pgostation, que era escrito em Objective-C/Cocoa para macOS.
 
+## Capturas de tela
+
+![Um cartão do Hitchhiker’s Guide com a paleta da pilha e o resultado de uma busca por “Arthur”](docs/screenshots/find.png)
+
+| | |
+|---|---|
+| ![Capa da pilha](docs/screenshots/stack.png) | ![Menu de capítulos aberto pela paleta da pilha](docs/screenshots/chapter-menu.png) |
+| Capa do *Hitchhiker's Guide* (Voyager Expanded Book) | O menu de capítulos da paleta, feito em HyperTalk pela própria pilha |
+| ![Inspetor de objetos em português](docs/screenshots/inspector.png) | ![Menu de idioma em inglês](docs/screenshots/language-menu.png) |
+| O inspetor mostra as propriedades de botões, campos, cartões e da pilha | O idioma da interface pode ser trocado no menu |
+| ![Escolha de pilha em espanhol](docs/screenshots/choose-stack.png) | |
+| Uma imagem de disco com várias pilhas (interface em espanhol) | |
+
+As capturas usam a pilha *The Hitchhiker's Guide to the Galaxy* da Voyager, que serviu de teste. O conteúdo dela pertence aos seus autores e não faz parte deste projeto.
+
 ## Como rodar
 
 ```bash
