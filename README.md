@@ -4,18 +4,20 @@ HCX é um leitor de pilhas HyperCard do Mac clássico. Esta é a versão para Li
 
 ## Capturas de tela
 
-![Um cartão do Hitchhiker’s Guide com a paleta da pilha e o resultado de uma busca por “Arthur”](docs/screenshots/find.png)
+![Tela de abertura do jogo Clue Deluxe, em cores](docs/screenshots/clue-deluxe.png)
 
 | | |
 |---|---|
-| ![Capa da pilha](docs/screenshots/stack.png) | ![Menu de capítulos aberto pela paleta da pilha](docs/screenshots/chapter-menu.png) |
-| Capa do *Hitchhiker's Guide* (Voyager Expanded Book) | O menu de capítulos da paleta, feito em HyperTalk pela própria pilha |
-| ![Inspetor de objetos em português](docs/screenshots/inspector.png) | ![Menu de idioma em inglês](docs/screenshots/language-menu.png) |
-| O inspetor mostra as propriedades de botões, campos, cartões e da pilha | O idioma da interface pode ser trocado no menu |
-| ![Escolha de pilha em espanhol](docs/screenshots/choose-stack.png) | ![Cartão colorido da pilha Tirada Celta](docs/screenshots/colors.png) |
-| Uma imagem de disco com várias pilhas (interface em espanhol) | Uma pilha colorida com o AddColor (*Tirada Celta*) |
+| ![Tabela periódica colorida](docs/screenshots/periodic-table.png) | ![Guia de identificação Black Rockfish](docs/screenshots/black-rockfish.png) |
+| *Periodic Table*: uma pilha educativa colorida com o AddColor | *Black Rockfish*: guia de identificação com fotos |
+| ![Jogo Carrot Patch com o aviso de shareware](docs/screenshots/carrot-patch.png) | ![HypoGraph desenhando gráficos de funções](docs/screenshots/hypograph.png) |
+| *Carrot Patch*: jogo em preto e branco, com o diálogo do próprio script | *HypoGraph*: gráficos de funções desenhados em HyperTalk |
+| ![Cartão colorido da pilha Tirada Celta](docs/screenshots/colors.png) | ![Um cartão do Hitchhiker's Guide com a paleta da pilha e o resultado de uma busca](docs/screenshots/find.png) |
+| *Tirada Celta*: figuras coloridas guardadas fora da pilha | *The Hitchhiker's Guide to the Galaxy* (Voyager): paleta e busca feitas pela própria pilha |
+| ![Escolha de pilha em espanhol](docs/screenshots/choose-stack.png) | ![Inspetor mostrando o cartão e o script da tabela periódica](docs/screenshots/inspector.png) |
+| Uma imagem de disco com mais de cem pilhas (interface em espanhol) | O inspetor mostra propriedades e scripts (interface em inglês) |
 
-As capturas usam as pilhas *The Hitchhiker's Guide to the Galaxy* da Voyager e *Tirada Celta*, que serviram de teste. O conteúdo delas pertence aos seus autores e não faz parte deste projeto.
+As capturas usam pilhas das coleções HyperCardVol1 e HyperCardVol2 e o *Hitchhiker's Guide* da Voyager, que serviram de teste. O conteúdo de cada pilha pertence aos seus autores e não faz parte deste projeto.
 
 ## Como rodar
 

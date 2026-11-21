@@ -12,20 +12,20 @@
   </description>
   <screenshots>
     <screenshot type="default">
+      <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/clue-deluxe.png</image>
+      <caption>A color game stack</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/periodic-table.png</image>
+      <caption>An educational stack colored with AddColor</caption>
+    </screenshot>
+    <screenshot>
       <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/find.png</image>
-      <caption>A stack card with its navigation palette and search results</caption>
+      <caption>A stack's own palette and search results</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/inspector.png</image>
-      <caption>The object inspector</caption>
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/chapter-menu.png</image>
-      <caption>A menu made by the stack's own HyperTalk scripts</caption>
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/colors.png</image>
-      <caption>A stack colored with AddColor</caption>
+      <caption>The object inspector with a card script</caption>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.pgostation.HCX.desktop</launchable>
