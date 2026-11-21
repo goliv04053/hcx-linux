@@ -1137,13 +1137,18 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         sw.set_child(lb)
         dlg.set_extra_child(sw)
         dlg.add_response("cancel", _("Cancel"))
+        dlg.set_close_response("cancel")
+        chosen = []
 
         def activated(_lb, row):
+            chosen.append(row)
             dlg.close()
             self.import_stack(row._mf, path)
         lb.connect("row-activated", activated)
 
         def response(d, r):
+            if chosen:
+                return
             if r == "cancel" and self._loading and self.stack is None:
                 self._loading = False
                 self.spinner.stop()
