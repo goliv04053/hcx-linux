@@ -114,7 +114,11 @@ class HostMixin:
         return [s for s in self.stacks_using if s is not self.stack]
 
     def stack_path(self, st):
-        return getattr(st, "mac_path", "") or st.name
+        """The Mac path of a stack, as in its long name. A stack that was a plain
+        file gets a disk name in front: scripts find their folder by looking for
+        the last colon (`repeat until last char of it is colon`)."""
+        p = getattr(st, "mac_path", "") or st.name
+        return p if ":" in p else "HD:" + p
 
     def changed(self, obj):
         self.refresh()
@@ -372,14 +376,13 @@ class HostMixin:
         for st in [self.stack] + self.stacks_using:
             if st is not None and st.name.lower() == short:
                 return st
-        st = self._stack_cache.get(short)
-        if st is not None:
-            return st
+        if short in self._stack_cache:
+            # False: looked for it before and it is not there
+            return self._stack_cache[short] or None
         if not load:
             return None
         st = self.load_stack_named(short)
-        if st is not None:
-            self._stack_cache[short] = st
+        self._stack_cache[short] = st if st is not None else False
         return st
 
     def load_stack_named(self, short):

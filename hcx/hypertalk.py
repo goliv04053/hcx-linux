@@ -2565,7 +2565,9 @@ class Parser:
             return self.number_of()
         fn = _FUNCS_OF.get(name)
         if fn is not None and not self._looks_like_object():
-            return self.call_function(name, [self.unary_of()])
+            # `the numToChar of x` is always the built-in function, even when a
+            # script defines its own numToChar (which often calls this form)
+            return fn(it, [self.unary_of()])
         o = self.prop_target()
         if o is None:
             return self.call_function(name, [""]) if fn else ""
