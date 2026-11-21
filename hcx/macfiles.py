@@ -116,6 +116,8 @@ def parse_macbinary(blob):
 
 _HQX = "!\"#$%&'()*+,-012345689@ABCDEFGHIJKLMNPQRSTUVXYZ[`abcdefhijklmpqr"
 _HQX_MAP = {c: i for i, c in enumerate(_HQX)}
+_HQX_TABLE = bytes(_HQX_MAP.get(chr(i), 0) for i in range(256))
+_HQX_JUNK = bytes(i for i in range(256) if chr(i) not in _HQX_MAP)
 
 
 def parse_binhex(blob):
@@ -126,39 +128,45 @@ def parse_binhex(blob):
     start = blob.find(b":", blob.find(b"\n", i) if blob.find(b"\n", i) >= 0 else i)
     if start < 0:
         return None
-    text = blob[start + 1:].decode("latin-1")
-    bits = 0
-    nbits = 0
+    body = blob[start + 1:]
+    end = body.find(b":")
+    if end >= 0:
+        body = body[:end]
+    # 6-bit values, one per character, skipping line breaks and other noise
+    vals = body.translate(_HQX_TABLE, _HQX_JUNK)
+    n = len(vals) // 4 * 4
     raw = bytearray()
-    for ch in text:
-        if ch == ":":
-            break
-        v = _HQX_MAP.get(ch)
-        if v is None:
-            continue
-        bits = (bits << 6) | v
-        nbits += 6
-        if nbits >= 8:
-            nbits -= 8
-            raw.append((bits >> nbits) & 0xFF)
+    for k in range(0, n, 4):
+        a, b, c, d = vals[k], vals[k + 1], vals[k + 2], vals[k + 3]
+        raw += bytes(((a << 2) | (b >> 4), ((b & 15) << 4) | (c >> 2), ((c & 3) << 6) | d))
+    rest = vals[n:]
+    if len(rest) >= 2:
+        raw.append((rest[0] << 2) | (rest[1] >> 4))
+    if len(rest) >= 3:
+        raw.append(((rest[1] & 15) << 4) | (rest[2] >> 2))
     # run-length decoding (0x90 marker)
     out = bytearray()
     j = 0
     last = 0
-    while j < len(raw):
-        c = raw[j]
-        if c == 0x90 and j + 1 < len(raw):
-            cnt = raw[j + 1]
-            j += 2
-            if cnt == 0:
-                out.append(0x90)
-                last = 0x90
-            else:
-                out.extend(bytes([last]) * (cnt - 1))
-            continue
-        out.append(c)
-        last = c
-        j += 1
+    nraw = len(raw)
+    while j < nraw:
+        k = raw.find(0x90, j)
+        if k < 0:
+            out += raw[j:]
+            break
+        if k > j:
+            out += raw[j:k]
+            last = raw[k - 1]
+        if k + 1 >= nraw:
+            out.append(0x90)
+            break
+        cnt = raw[k + 1]
+        j = k + 2
+        if cnt == 0:
+            out.append(0x90)
+            last = 0x90
+        else:
+            out += bytes((last,)) * (cnt - 1)
     nl = out[0]
     p = 1 + nl + 1
     name = mac_name(bytes(out[1:1 + nl]))
@@ -360,15 +368,60 @@ class OpenResult:
     def __init__(self, files, container_name, kind):
         self.files = files          # list of MacFile (stacks first)
         self.container_name = container_name
-        self.kind = kind            # 'file', 'macbinary', 'binhex', 'applesingle', 'hfs'
+        self.kind = kind            # 'file', 'macbinary', 'binhex', 'applesingle', 'hfs', 'stuffit'
+        self.errors = []            # (path, reason) of archive entries that could not be read
 
     @property
     def stacks(self):
         return [f for f in self.files if f.is_stack()]
 
 
+def _is_archive(mf):
+    from . import stuffit
+    return stuffit.is_stuffit(mf.data) or (not mf.data and mf.type == b"SIT!" and stuffit.is_stuffit(mf.rsrc))
+
+
+def expand_archives(files, depth=0, errors=None):
+    """Replace the StuffIt archives among files by the files inside them
+    (archives inside archives too, a few levels deep). Entries that could
+    not be extracted are added to errors as (path, reason)."""
+    from . import stuffit
+    out = []
+    for mf in files:
+        if depth < 4 and mf.data and stuffit.is_stuffit(mf.data):
+            prefix = mf.path.rsplit(".", 1)[0] if mf.path.lower().endswith(".sit") else mf.path
+            try:
+                inner, errs = stuffit.extract(mf.data)
+            except (stuffit.StuffItError, IndexError, struct.error) as e:
+                if errors is not None:
+                    errors.append((prefix or mf.name, str(e)))
+                out.append(mf)
+                continue
+            for f in inner:
+                f.path = (prefix + ":" + f.path) if prefix else f.path
+            if errors is not None:
+                errors.extend(((prefix + ":" + p) if prefix else p, r) for p, r in errs)
+            out.extend(expand_archives(inner, depth + 1, errors))
+        else:
+            out.append(mf)
+    return out
+
+
+def _archive_result(files, name, kind):
+    from . import stuffit
+    if not any(f.data and stuffit.is_stuffit(f.data) for f in files):
+        return None
+    errors = []
+    files = expand_archives(files, errors=errors)
+    files.sort(key=lambda f: (not f.is_stack(), f.path.lower()))
+    res = OpenResult(files, name, "stuffit")
+    res.errors = errors
+    return res
+
+
 def open_path(path):
     """Read anything that may contain a HyperCard stack."""
+    from . import stuffit
     with open(path, "rb") as fh:
         blob = fh.read()
     name = os.path.basename(path)
@@ -376,25 +429,34 @@ def open_path(path):
     if looks_like_stack(blob):
         return OpenResult([MacFile(name, blob, _sidecar_rsrc(path), b"STAK", b"WILD")], name, "file")
 
+    if stuffit.is_stuffit(blob):
+        return _archive_result([MacFile(name, blob, b"", b"SIT!", b"SIT!", "")], name, "stuffit")
+
     ad = parse_apple_single_double(blob)
     if ad is not None and ad.get("data"):
-        return OpenResult([MacFile(ad.get("name", name), ad.get("data", b""), ad.get("rsrc", b""),
-                                   ad.get("type", b"????"), ad.get("creator", b"????"))], name, "applesingle")
+        mf = MacFile(ad.get("name", name), ad.get("data", b""), ad.get("rsrc", b""),
+                     ad.get("type", b"????"), ad.get("creator", b"????"))
+        return _archive_result([mf], name, "stuffit") or OpenResult([mf], name, "applesingle")
 
     mb = parse_macbinary(blob)
+    if mb is not None and mb.data and stuffit.is_stuffit(mb.data):
+        mb.path = ""
+        return _archive_result([mb], name, "stuffit")
     if mb is not None and (mb.is_stack() or mb.rsrc):
         return OpenResult([mb], name, "macbinary")
 
     if b"(This file must be converted with BinHex" in blob[:4096]:
         bh = parse_binhex(blob)
         if bh is not None:
-            return OpenResult([bh], name, "binhex")
+            bh.path = ""
+            return _archive_result([bh], name, "stuffit") or OpenResult([bh], name, "binhex")
 
     vols = find_hfs_volumes(blob)
     if vols:
         files = []
         for v in vols:
             files.extend(v.files)
+        files = expand_archives(files)
         files.sort(key=lambda f: (not f.is_stack(), f.path.lower()))
         return OpenResult(files, vols[0].name, "hfs")
 

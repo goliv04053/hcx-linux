@@ -92,6 +92,8 @@ def tokenize(line):
         v = m.group(k)
         if k == "str":
             v = v[1:-1] if v.endswith('"') and len(v) > 1 else v[1:]
+            if "\u2028" in v:
+                v = v.replace("\u2028", "\n")
         out.append(Tok(k, v))
     return out
 
@@ -200,6 +202,14 @@ class Script:
                 out.append(st)
         return out, i
 
+    def _if_block(self, lines, i, enders):
+        """The statements of a block-form if (between then/else and end if)."""
+        self._nest = getattr(self, "_nest", 0) + 1
+        try:
+            return self._block(lines, i, enders)
+        finally:
+            self._nest -= 1
+
     def _stmt(self, lines, i, toks):
         """Parse one statement starting at lines[i]. Returns (Stmt, next index)."""
         if not toks:
@@ -244,13 +254,14 @@ class Script:
         rest = toks[k + 1:]
         i += 1
         if rest:
-            then_block = [self._stmt_from_toks(rest, lines, i)[0]] if rest[0].low != "if" else None
-            if then_block is None:
+            if rest[0].low == "if":
                 st, i = self._if_inline(rest, lines, i)
                 then_block = [st]
-            else_block, i, _ = self._else(lines, i, block_form=False)
+                else_block, i, _ = self._else(lines, i, block_form=False)
+            else:
+                then_block, else_block, i = self._then_else_inline(rest, lines, i)
         else:
-            then_block, i = self._block(lines, i, ("else", "end if"))
+            then_block, i = self._if_block(lines, i, ("else", "end if"))
             else_block, i, _ = self._else(lines, i, block_form=True)
         return Stmt("if", cond, then_block, else_block), i
 
@@ -274,12 +285,40 @@ class Script:
         cond = toks[1:k]
         rest = toks[k + 1:]
         if rest:
-            then_block = [self._stmt_from_toks(rest, lines, i)[0]]
-            else_block, i, _ = self._else(lines, i, block_form=False)
+            if rest[0].low == "if":
+                then_block = [self._stmt_from_toks(rest, lines, i)[0]]
+                else_block, i, _ = self._else(lines, i, block_form=False)
+            else:
+                then_block, else_block, i = self._then_else_inline(rest, lines, i)
         else:
-            then_block, i = self._block(lines, i, ("else", "end if"))
+            then_block, i = self._if_block(lines, i, ("else", "end if"))
             else_block, i, _ = self._else(lines, i, block_form=True)
         return Stmt("if", cond, then_block, else_block), i
+
+    def _then_else_inline(self, rest, lines, i):
+        """`if c then a else b` on one line, or `if c then a` with the else
+        on a following line. Returns (then block, else block, next index)."""
+        k = -1
+        depth = 0
+        for j, t in enumerate(rest):
+            if t.kind == "op" and t.val == "(":
+                depth += 1
+            elif t.kind == "op" and t.val == ")":
+                depth -= 1
+            elif depth == 0 and t.kind == "word" and t.low == "else":
+                k = j
+                break
+        if k < 0:
+            then_block = [Stmt("cmd", rest, text=" ".join(t.val for t in rest))]
+            else_block, i, _ = self._else(lines, i, block_form=False)
+            return then_block, else_block, i
+        a, b = rest[:k], rest[k + 1:]
+        then_block = [Stmt("cmd", a, text=" ".join(t.val for t in a))] if a else []
+        if not b:
+            else_block, i = self._if_block(lines, i, ("end if",))
+            return then_block, else_block, i + 1
+        st, i = self._stmt_from_toks(b, lines, i)
+        return then_block, [st], i
 
     def _stmt_from_toks(self, toks, lines, i):
         if toks and toks[0].low == "if":
@@ -304,18 +343,19 @@ class Script:
         rest = toks[1:]
         j += 1
         if not rest:
-            blk, j = self._block(lines, j, ("end if",))
+            blk, j = self._if_block(lines, j, ("end if",))
             return blk, j + 1, True
         if rest[0].low == "if":
             st, j = self._if_virtual(rest, lines, j)
             return [st], j, True
         st = Stmt("cmd", rest, text=" ".join(t.val for t in rest))
         if block_form:
-            # `else stmt` closes a block if; tolerate a stray `end if` right after
+            # `else stmt` closes a block if; tolerate a stray `end if` right after,
+            # unless this if sits inside another block if: that `end if` is then its own
             k = j
             while k < n and not lines[k]:
                 k += 1
-            if k < n:
+            if k < n and not getattr(self, "_nest", 0):
                 t2 = tokenize(lines[k])
                 if len(t2) >= 2 and t2[0].low == "end" and t2[1].low == "if":
                     j = k + 1
@@ -1489,7 +1529,13 @@ class Interp:
         if p.peek_low() == "to":
             p.next()
             if p.peek_low() == "hypercard":
-                target = None
+                # straight to HyperCard: a built-in command runs as written, without the scripts
+                mtoks = tokenize(msg)
+                f = getattr(self, "cmd_" + mtoks[0].low, None) \
+                    if mtoks and mtoks[0].kind == "word" and mtoks[0].low != "domenu" else None
+                if f is not None:
+                    f(mtoks)
+                    return
                 self.builtin_message(msg.split()[0].lower() if msg.split() else "", self._msg_params(msg))
                 return
             target = p.object_ref()
@@ -1996,7 +2042,10 @@ class Interp:
         w = p.peek_low()
         if w == "file":
             p.next()
-            self.host.file_open(p.expr(stop=("for",)))
+            try:
+                self.host.file_open(p.expr(stop=("for",)))
+            except OSError:
+                self.result = "Can't open that file."
         elif w in ("stack",):
             p.next()
             self.host.open_stack(p.expr(stop=("in",)), new_window=True)
@@ -2035,7 +2084,10 @@ class Interp:
         p.expect("to")
         if p.peek_low() == "file":
             p.next()
-        self.host.file_write(p.expr(stop=("at",)), text)
+        try:
+            self.host.file_write(p.expr(stop=("at",)), text)
+        except OSError:
+            self.result = "Can't write to that file."
 
     def cmd_print(self, toks):
         self.host.domenu("print card")
@@ -2213,6 +2265,15 @@ class Parser:
             left = self.apply(op, left, right)
 
     def apply(self, op, a, c):
+        try:
+            return self._apply(op, a, c)
+        except OverflowError:
+            return "INF"
+        except ValueError:
+            # fmod(INF, 2) and the like: HyperCard answers NAN instead of stopping
+            return "NAN"
+
+    def _apply(self, op, a, c):
         if op in ("or", "and"):
             x = to_bool(a)
             y = to_bool(c)
@@ -2266,7 +2327,13 @@ class Parser:
                 return "INF"
             return fmt_num(math.fmod(x, y))
         if op == "^":
-            return fmt_num(x ** y)
+            try:
+                r = x ** y
+            except (OverflowError, ZeroDivisionError):
+                return "INF"
+            if isinstance(r, complex):
+                return "NAN"
+            return fmt_num(r)
         raise HTError("Unknown operator " + op)
 
     def unary(self):
@@ -2351,8 +2418,8 @@ class Parser:
             self.next()
             return self.number_of()
         if (low in OBJ_WORDS and (low not in _PLURAL_OBJ_WORDS or it.get_var(low) is None)) or \
-                low in ("me", "this", "menu", "menuitem", "window", "target") or \
-                (low in ("next", "prev", "previous") and self.peek_low() in OBJ_WORDS):
+                low in ("me", "menu", "menuitem", "window", "target") or \
+                (low in ("next", "prev", "previous", "this") and self.peek_low() in OBJ_WORDS):
             self.i -= 1
             o = self.object_ref()
             if o is None:
@@ -2530,7 +2597,8 @@ class Parser:
         return parse_ref(it, v)
     def _looks_like_object(self):
         w = self.peek_low()
-        return w in OBJ_WORDS or w in ("me", "this", "target", "menu", "menuitem", "window") or \
+        return w in OBJ_WORDS or w in ("me", "target", "menu", "menuitem", "window") or \
+            (w == "this" and self.peek_low(1) in OBJ_WORDS) or \
             (w in ORDINALS and self.peek_low(1) in OBJ_WORDS) or \
             (w == "the" and self.peek_low(1) in ("target",) + tuple(OBJ_WORDS))
 
@@ -2913,6 +2981,18 @@ class Parser:
         if w in ORDINALS:
             ordinal = ORDINALS[self.next().low]
             w = self.peek_low()
+            if w == "menuitem":
+                # `the last menuItem of menu "Edit"`
+                self.next()
+                if self.peek_low() in ("of", "in"):
+                    self.next()
+                if self.peek_low() == "menu":
+                    self.next()
+                menu = self._name_expr(stop)
+                m = h._menu(menu) if hasattr(h, "_menu") else None
+                n = len(m[1]) if m else 0
+                k = {-1: n, "mid": (n + 1) // 2, "any": _random.randint(1, max(1, n))}.get(ordinal, ordinal)
+                return Obj("menuitem", menu, str(k))
         layer_word = None
         if w in LAYER_WORDS and self.peek_low(1) in ("button", "btn", "field", "fld", "part", "buttons",
                                                       "fields"):
@@ -3149,8 +3229,12 @@ def _eq(a, c):
         return to_num(a) == to_num(c)
     # surrounding spaces don't count, but a return is a real character:
     # `repeat until char n of it is not return` must stop at the end of the text
+    # (but empty is not equal to a space: `repeat while char 1 of x is space` must end)
     a, c = str(a).lower(), str(c).lower()
-    return a == c or a.strip(" \t") == c.strip(" \t")
+    if a == c:
+        return True
+    sa, sc = a.strip(" \t"), c.strip(" \t")
+    return sa == sc and sa != ""
 
 
 def _is_type(v, typ):

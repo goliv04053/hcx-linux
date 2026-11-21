@@ -183,13 +183,22 @@ class StackImporter:
         self.v1 = False
 
     # -- text ------------------------------------------------------------
-    def text(self, raw):
+    def _decode(self, raw):
         enc = self.stack.encoding
         try:
-            s = raw.decode(enc)
+            return raw.decode(enc)
         except UnicodeDecodeError:
-            s = raw.decode("cp932" if enc == "shift_jis" else "mac_roman", errors="replace")
-        return s.replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "")
+            return raw.decode("cp932" if enc == "shift_jis" else "mac_roman", errors="replace")
+
+    def text(self, raw):
+        return self._decode(raw).replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "")
+
+    def script_text(self, raw):
+        """A script. Only CR ends a script line on the Mac: a linefeed is an
+        ordinary character (some stacks have one inside a quoted string), so it
+        is kept as U+2028 and the interpreter reads it back as a line break."""
+        s = self._decode(raw).replace("\r\n", "\r").replace("\x00", "")
+        return s.replace("\n", "\u2028").replace("\r", "\n")
 
     def detect_encoding(self, raw_names, font_ids):
         if self.encoding_opt in ("mac_roman", "shift_jis"):
@@ -303,7 +312,7 @@ class StackImporter:
         st.encoding = self.detect_encoding(raw_font_names + [script_raw[:2000]], used_fonts)
         resources.ENCODING[0] = st.encoding
         st.fonts = {fid: self.text(raw) for fid, raw in raw_fonts.items()}
-        st.script = self.text(script_raw)
+        st.script = self.script_text(script_raw)
 
         # patterns
         for i in range(40):
@@ -485,7 +494,7 @@ class StackImporter:
         no = part_off + parts_size + contents_size
         name, nxt = cstr(b, no) if no < len(b) else (b"", no)
         L.name = self.text(name)
-        L.script = self.text(cstr(b, nxt)[0]) if nxt < len(b) else ""
+        L.script = self.script_text(cstr(b, nxt)[0]) if nxt < len(b) else ""
         return L
 
     def read_part(self, d):
@@ -508,7 +517,7 @@ class StackImporter:
         p.text_height = u16(d, 0x1C)
         name, nxt = cstr(d, 0x1E)
         p.name = self.text(name)
-        p.script = self.text(cstr(d, nxt + 1)[0]) if nxt + 1 < len(d) else ""
+        p.script = self.script_text(cstr(d, nxt + 1)[0]) if nxt + 1 < len(d) else ""
         if p.type == "button":
             p.enabled = not (f & 0x01)
             p.show_name = bool(f2 & 0x80)

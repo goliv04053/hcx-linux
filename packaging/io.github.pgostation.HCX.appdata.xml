@@ -31,6 +31,11 @@
   <launchable type="desktop-id">io.github.pgostation.HCX.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.2" date="2026-11-21">
+      <description>
+        <p>Opens StuffIt archives (.sit, .sit.hqx) directly, much faster BinHex, and HyperTalk fixes found by testing the 847 stacks of the Pantechnicon collection.</p>
+      </description>
+    </release>
     <release version="3.1" date="2026-11-21">
       <description>
         <p>AddColor colors, MACE and IMA compressed sounds, and many HyperTalk fixes found by testing 178 stacks. Scripts no longer freeze the window; Esc stops one.</p>

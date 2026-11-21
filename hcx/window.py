@@ -1256,22 +1256,27 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
             self._fail(val)
         elif kind == "opened":
             stacks = val.stacks
-            if not stacks:
+            if not stacks and getattr(val, "errors", None):
+                self._fail(_("No HyperCard stack could be extracted from this archive. Some files in it could not be read (%s).")
+                           % ", ".join(sorted({r for _p, r in val.errors})))
+            elif not stacks:
                 self._fail(_("No HyperCard stack was found in this file."))
             elif len(stacks) == 1:
                 self.import_stack(stacks[0], extra)
             else:
-                self._choose_stack(stacks, extra)
+                self._choose_stack(stacks, extra, val.kind)
         elif kind == "stack":
             self._show_stack(val, extra)
         return False
 
-    def _choose_stack(self, stacks, path):
-        dlg = Adw.AlertDialog(heading=_("Choose a Stack"), body=_("This disk image contains several stacks."))
+    def _choose_stack(self, stacks, path, kind="hfs"):
+        body = _("This disk image contains several stacks.") if kind == "hfs" else \
+            _("This archive contains several stacks.")
+        dlg = Adw.AlertDialog(heading=_("Choose a Stack"), body=body)
         lb = Gtk.ListBox(css_classes=["boxed-list"], selection_mode=Gtk.SelectionMode.NONE)
         for mf in stacks:
             row = Adw.ActionRow(title=GLib.markup_escape_text(mf.name), activatable=True)
-            folder = os.path.dirname(mf.path) if mf.path else ""
+            folder = mf.path.rsplit(":", 1)[0].replace(":", " ▸ ") if ":" in (mf.path or "") else ""
             if folder:
                 row.set_subtitle(GLib.markup_escape_text(folder))
             row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))

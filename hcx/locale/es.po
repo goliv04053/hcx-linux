@@ -519,6 +519,9 @@ msgstr "Elige una pila"
 msgid "This disk image contains several stacks."
 msgstr "Esta imagen de disco contiene varias pilas."
 
+msgid "This archive contains several stacks."
+msgstr "Este archivo comprimido contiene varias pilas."
+
 #: hcx/window.py:1242
 msgid "Importing…"
 msgstr "Importando…"
@@ -526,3 +529,6 @@ msgstr "Importando…"
 #: hcx/window.py:1336
 msgid "Package exported to %s"
 msgstr "Paquete exportado a %s"
+
+msgid "No HyperCard stack could be extracted from this archive. Some files in it could not be read (%s)."
+msgstr "No se pudo extraer ninguna pila de HyperCard de este archivo comprimido. Algunos archivos que contiene no se pudieron leer (%s)."

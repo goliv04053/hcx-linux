@@ -7,25 +7,26 @@ pilhas reais. Quer ajudar? Veja [Como ajudar](#como-ajudar) no fim.
 *English: this is the list of what HCX for Linux still lacks, by priority.
 Pull requests and issues are welcome in English too.*
 
-## Já funciona (versão 3.1)
+## Já funciona (versão 3.2)
 
 - Leitura de pilhas HyperCard 1.x e 2.x, MacBinary, BinHex, AppleDouble e imagens de disco HFS
+- Arquivos StuffIt (.sit e .sit.hqx, do StuffIt 1.5 ao 5) abertos direto, sem descompactar antes
 - Interpretador HyperTalk: cerca de 570 comandos, funções e propriedades da referência 2.4 testados
 - Os XCMDs/XFCNs mais comuns reescritos em Python (lista no README)
 - Interface em português, espanhol e inglês
-- Testado com as coleções HyperCardVol1 e HyperCardVol2 (178 pilhas de jogos, livros, clip-art e utilitários): todas abrem
+- Testado com as coleções HyperCardVol1 e HyperCardVol2 (178 pilhas de jogos, livros, clip-art e utilitários) e com o Pantechnicon (847 pilhas e cerca de 500 handlers): todas abrem
 - Sons comprimidos do Mac (MACE 3:1, MACE 6:1 e IMA 4:1)
 - Cores das pilhas feitas com as Color Tools do HyperCard 2 (XCMD AddColor): botões, campos, retângulos e figuras coloridas aparecem como no Mac
 - Jogos que ficam num laço esperando o clique (`repeat until the mouseClick`) funcionam, e a janela continua respondendo enquanto um script roda. Esc para um script que não termina.
 
-## Próxima versão (3.2): fala, vídeo e fontes
+## Próxima versão (3.3): fala, vídeo e fontes
 
 - [ ] Fala: `speak` e os XCMDs de fala (Vocalise, say) usando o speech-dispatcher do Linux
 - [ ] QuickTime: QTPict e os XCMDs de filme
 - [ ] Fontes bitmap do Mac guardadas na pilha (recursos FONT/NFNT), para o texto quebrar a linha no mesmo lugar que no Mac
 - [ ] Mais XCMDs/XFCNs reescritos, conforme as pilhas que a comunidade testar
 
-## 3.3: pilhas que reagem ao usuário
+## 3.4: pilhas que reagem ao usuário
 
 Hoje a janela só manda `mouseDown` e `mouseUp` para os scripts. Muitas pilhas
 dependem das outras mensagens do sistema.
@@ -40,7 +41,7 @@ dependem das outras mensagens do sistema.
 - [ ] `flash`, `drag` e `move` (hoje não fazem nada)
 - [ ] `play` com notas e tempo (`play "harpsichord" tempo 200 "c4 d e"`); hoje toca só o som
 
-## 3.4: arquivos e edição
+## 3.5: arquivos e edição
 
 - [ ] Imagens de disco HFS+ (Mac OS Estendido)
 - [ ] Criar e apagar cartões, pelo menu e por script (`doMenu "New Card"`, `delete this card`, `create card`)
@@ -56,6 +57,7 @@ dependem das outras mensagens do sistema.
 - [ ] `export paint` e `import paint`
 - [ ] Depurador: checkpoints, Message Watcher, Variable Watcher
 - [ ] Pacotes para Flatpak e outras distribuições
+- [ ] Outros compactadores do Mac: Compact Pro (.cpt), StuffIt X (.sitx) e os instaladores autoextraíveis (.sea)
 
 ## Não planejado
 

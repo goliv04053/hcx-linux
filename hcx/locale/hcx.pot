@@ -519,10 +519,16 @@ msgstr ""
 msgid "This disk image contains several stacks."
 msgstr ""
 
+msgid "This archive contains several stacks."
+msgstr ""
+
 #: hcx/window.py:1242
 msgid "Importing…"
 msgstr ""
 
 #: hcx/window.py:1336
 msgid "Package exported to %s"
+msgstr ""
+
+msgid "No HyperCard stack could be extracted from this archive. Some files in it could not be read (%s)."
 msgstr ""
