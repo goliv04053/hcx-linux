@@ -101,6 +101,8 @@ O *Hitchhiker's Guide* abre com a paleta de controles e o menu Books. Funcionam:
 - Imagens HFS+ (Mac OS Estendido) ainda não são lidas. Só as imagens HFS clássicas.
 - Partes do HyperTalk que dependem do Mac (AppleEvents, `the mouse` fora da janela, impressão de relatórios, paleta de pintura) não fazem nada.
 
+O que ainda falta, e em que ordem, está no [ROADMAP.md](ROADMAP.md).
+
 ## Código-fonte
 
 O código-fonte completo está neste repositório (também distribuído como `HCX-source.tar.gz`). É Python puro: não precisa compilar. Para rodar direto do código, sem AppImage:
