@@ -8,7 +8,7 @@ import traceback
 
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
 
-from . import macfiles
+from . import addcolor, macfiles
 from .cardview import CardView
 from . import i18n
 from .i18n import N_, _
@@ -23,6 +23,31 @@ from .stackimport import import_stack
 ZOOMS = [1.0, 1.5, 2.0, 3.0, 4.0]
 PROGRESS_LABELS = {"resources": N_("Reading resources…"), "bg": N_("Reading backgrounds…"),
                    "card": N_("Reading cards…"), "xml": N_("Writing package…"), "done": N_("Loading…")}
+
+
+_MEDIA_OK = []
+
+
+def _media_ok():
+    """Can Gtk.MediaFile play sounds here? With GTK's GStreamer backend it needs the
+    playbin element (gst-plugins-base); without it GTK stops the whole program."""
+    if not _MEDIA_OK:
+        ok = True
+        try:
+            gi_ = __import__("gi")
+            gi_.require_version("Gst", "1.0")
+            from gi.repository import Gst
+            Gst.init(None)
+            ok = Gst.ElementFactory.find("playbin") is not None
+        except (ValueError, ImportError):
+            import glob
+            dirs = glob.glob("/usr/lib*/gstreamer-1.0") + glob.glob("/usr/lib/*-linux-gnu*/gstreamer-1.0")
+            gst_backend = glob.glob("/usr/lib*/gtk-4.0/4.0.0/media/libmedia-gstreamer.so") + \
+                glob.glob("/usr/lib/*-linux-gnu*/gtk-4.0/4.0.0/media/libmedia-gstreamer.so")
+            if gst_backend and dirs:
+                ok = any(os.path.exists(os.path.join(d, "libgstplayback.so")) for d in dirs)
+        _MEDIA_OK.append(ok)
+    return _MEDIA_OK[0]
 
 
 class HCXWindow(Adw.ApplicationWindow, HostMixin):
@@ -385,6 +410,8 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
             del self.history[:-200]
             self.forth = []
         self.index = index
+        if old_card is not new_card:
+            self.addcolor_state["extra"] = []     # colors drawn by AddColor commands last until the card changes
         if index != getattr(self, "_found_index", None):
             self.view.found = None
         if self.view.locked is not None and effect:
@@ -499,6 +526,13 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         # changes made by scripts are not treated as user edits
         self.view.refresh()
 
+    def color_refresh(self, effect=None):
+        if effect and self.view.locked is None:
+            self.view.lock()
+            self.view.unlock(effect)
+        else:
+            self.view.refresh()
+
     def changed(self, obj):
         # HyperCard saves what scripts change; HCX does it when the stack closes
         if self.stack is not None:
@@ -559,6 +593,16 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         self.play_file(path)
 
     def play_file(self, path):
+        if not _media_ok():
+            # GTK's GStreamer backend aborts the program when GStreamer's playback plugins are missing
+            for tool in ("pw-play", "paplay", "aplay"):
+                exe = shutil.which(tool)
+                if exe:
+                    import subprocess
+                    subprocess.Popen([exe, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return
+            self.beep()
+            return
         media = Gtk.MediaFile.new_for_filename(path)
         self._sounds = [m for m in self._sounds if not m.get_ended()][-4:] + [media]
         media.play()
@@ -1292,6 +1336,14 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         self._told_modified = False
         self.dirty = False
         self._search_pos = None
+        self.addcolor_state["enabled"] = True
+        self.addcolor_state["extra"] = []
+        if extra and extra[0] is not None:
+            try:
+                addcolor.ensure(st, extra[1], extra[0].path)
+            except Exception:  # noqa: BLE001 - color is optional
+                traceback.print_exc()
+        self.view.color_state = self.addcolor_state
         self.view.set_stack(st)
         if first:
             z = self._initial_zoom(st)

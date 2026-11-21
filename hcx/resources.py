@@ -113,12 +113,13 @@ def curs_png(b):
 
 
 def _ctable(b, o):
+    device = bool(_u16(b, o + 4) & 0x8000)   # device table: the entry's position is its index
     n = _u16(b, o + 6) + 1
     pal = {}
     o += 8
     for i in range(n):
         v, r, g, bl = struct.unpack_from(">HHHH", b, o)
-        pal[v & 0xFF if v < 0x8000 else i] = (r >> 8, g >> 8, bl >> 8)
+        pal[i if device or v >= 0x8000 else v & 0xFF] = (r >> 8, g >> 8, bl >> 8)
         o += 8
     return pal, o
 

@@ -471,7 +471,143 @@ def picture_cmd(it, a):
     it.host.window_create(title, "picture", {"png": png, "visible": visible, "style": style})
 
 
-@xcmd("MaxMem", "Compact", "PurgeMem", "FlushMem")
+# -- color (HyperCard 2.x Color Tools) ----------------------------------------------------------
+
+_ADDCOLOR_EFFECTS = {
+    "dissolve": ("dissolve", ""), "barndooropen": ("barn door", "open"), "barndoorclose": ("barn door", "close"),
+    "irisopen": ("iris", "open"), "irisclose": ("iris", "close"), "fromleft": ("wipe", "right"),
+    "fromright": ("wipe", "left"), "fromtop": ("wipe", "down"), "frombottom": ("wipe", "up"),
+    "fromtopleft": ("wipe", "down"), "fromtopright": ("wipe", "down"), "frombottomleft": ("wipe", "up"),
+    "frombottomright": ("wipe", "up"), "venetianblinds": ("venetian blinds", ""),
+    "checkerboard": ("checkerboard", ""),
+}
+
+
+def _addcolor_effect(name, ticks):
+    low = str(name).strip().lower().replace(" ", "")
+    if not low or low in ("stamp", "plain", "none"):
+        return None
+    name, direction = _ADDCOLOR_EFFECTS.get(low, ("dissolve", ""))
+    t = ht.to_num(ticks) if ht.is_number(ticks) else 30
+    speed = "fast" if t < 20 else ("normal" if t < 60 else "slow")
+    return (name, direction, speed)
+
+
+def _addcolor_rect(text):
+    try:
+        v = [int(ht.to_num(x)) for x in str(text).split(",")]
+    except ht.HTError:
+        return None
+    return v if len(v) in (2, 4) else None
+
+
+def _addcolor_items(it, layer):
+    from . import addcolor
+    h = it.host
+    t = addcolor.load(h.stack) if h.stack is not None else None
+    if t is None or h.card is None:
+        return []
+    if layer == "bg":
+        bg = h.bg_of(h.card)
+        return t["backgrounds"].setdefault(addcolor.key(bg.id), []) if bg else []
+    return t["cards"].setdefault(addcolor.key(h.card.id), [])
+
+
+@xcmd("AddColor")
+def add_color(it, a):
+    """AddColor colorCard|colorBg [,effect, ticks] · install · remove ·
+    colorButton|colorField, cd|bg, id, "r,g,b", bevel · colorRect, cd|bg, rect, "r,g,b", bevel ·
+    colorPict|colorPictFile, cd|bg, name, loc or rect, o|t, effect, ticks ·
+    changeObjectColor|changeObjectBounds, cd|bg, number, value · getObjectColor|getObjectBounds, cd|bg, number.
+    The colors stored with the stack are drawn whenever a card is shown; objects drawn by
+    command last until the card changes."""
+    from . import addcolor
+    h = it.host
+    state = h.addcolor_state
+    cmd = str(_arg(a, 0)).strip().lower()
+    layer = "bg" if str(_arg(a, 1)).strip().lower() in ("bg", "bkgnd", "background") else "cd"
+    if cmd == "install":
+        state["enabled"] = True
+        h.color_refresh(None)
+    elif cmd == "remove":
+        state["enabled"] = False
+        h.color_refresh(None)
+    elif cmd in ("colorcard", "colorbg", "colorbkgnd", "colorbackground", "colorstack"):
+        state["enabled"] = True
+        h.color_refresh(_addcolor_effect(_arg(a, 1), _arg(a, 2)))
+    elif cmd in ("colorbutton", "colorfield"):
+        rgb = addcolor.parse_rgb(_arg(a, 3))
+        if rgb is None or not ht.is_number(_arg(a, 2)):
+            return
+        bevel = int(ht.to_num(_arg(a, 4))) if ht.is_number(_arg(a, 4)) else 0
+        state["extra"].append({"type": "button" if cmd == "colorbutton" else "field", "layer": layer,
+                               "id": int(ht.to_num(_arg(a, 2))), "rgb": rgb, "bevel": bevel, "card": h.card})
+        h.color_refresh(None)
+    elif cmd == "colorrect":
+        r = _addcolor_rect(_arg(a, 2))
+        rgb = addcolor.parse_rgb(_arg(a, 3))
+        if not r or len(r) != 4 or rgb is None:
+            return
+        bevel = int(ht.to_num(_arg(a, 4))) if ht.is_number(_arg(a, 4)) else 0
+        state["extra"].append({"type": "rect", "layer": layer, "rect": r, "rgb": rgb, "bevel": bevel,
+                               "card": h.card})
+        h.color_refresh(None)
+    elif cmd in ("colorpict", "colorpictfile", "colorpicture"):
+        transparent = str(_arg(a, 4)).strip().lower().startswith("t")
+        f = addcolor.picture_for_script(h, str(_arg(a, 2)), cmd != "colorpictfile", transparent)
+        if f is None:
+            it.result = "Couldn't find picture “%s”." % _arg(a, 2)
+            return
+        path, w, hgt = f
+        r = _addcolor_rect(_arg(a, 3)) or [0, 0]
+        if len(r) == 2:
+            r = [r[0], r[1], r[0] + w, r[1] + hgt]
+        state["extra"].append({"type": "pict", "layer": layer, "rect": r, "file": path, "card": h.card})
+        h.color_refresh(_addcolor_effect(_arg(a, 5), _arg(a, 6)))
+    elif cmd in ("changeobjectcolor", "changeobjectbounds", "getobjectcolor", "getobjectbounds",
+                 "deleteobject", "hideobject", "showobject"):
+        items = _addcolor_items(it, layer)
+        n = int(ht.to_num(_arg(a, 2))) if ht.is_number(_arg(a, 2)) else 0
+        if not 1 <= n <= len(items):
+            it.result = "No such object"
+            return
+        obj = items[n - 1]
+        if cmd == "changeobjectcolor":
+            rgb = addcolor.parse_rgb(_arg(a, 3))
+            if rgb is not None:
+                obj["rgb"] = rgb
+        elif cmd == "changeobjectbounds":
+            r = _addcolor_rect(_arg(a, 3))
+            if r and len(r) == 4 and "rect" in obj:
+                obj["rect"] = r
+        elif cmd == "getobjectcolor":
+            it.result = ",".join(str(x) for x in obj.get("rgb", []))
+            return
+        elif cmd == "getobjectbounds":
+            it.result = ",".join(str(x) for x in obj.get("rect", []))
+            return
+        elif cmd == "deleteobject":
+            del items[n - 1]
+        else:
+            obj["hidden"] = cmd == "hideobject"
+        h.color_refresh(None)
+    # anything else (getBitsCall, …) has nothing to do here
+
+
+@xcmd("colorizeHC", "ColorizeHC")
+def colorize_hc(it, a):
+    """colorizeHC: an older color XCMD; HCX draws the colors stored with the stack anyway."""
+    it.host.color_refresh(None)
+
+
+@xfcn("GetDepth", "MaxDepth", "ScreenDepth", "GetScreenDepth")
+def get_depth(it, a):
+    """Screen color depth in bits. HCX draws in full color, but stacks of the time
+    only know 1 to 16 bits ("thousands of colors") and some refuse larger values."""
+    return "16"
+
+
+@xcmd("SetDepth", "HideDesktop", "ShowDesktop", "MaxMem", "Compact", "PurgeMem", "FlushMem")
 def max_mem(it, a):
     return None
 

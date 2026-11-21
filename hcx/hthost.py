@@ -35,6 +35,7 @@ def mac_to_local(path):
 class HostMixin:
     def init_host(self):
         self.interp = ht.Interp(self)
+        self.addcolor_state = {"enabled": True, "extra": []}   # see addcolor.py and the AddColor XCMD
         self.stacks_using = []
         self._stack_cache = {}          # lower name -> Stack
         self.script_menus = []          # [name, [[item, msg, enabled, checked, cmdchar], ...], enabled, standard]
@@ -645,6 +646,10 @@ class HostMixin:
 
     def click_loc(self):
         return self._click
+
+    def color_refresh(self, effect=None):
+        """AddColor changed what the card looks like."""
+        self.refresh()
 
     def poll(self):
         """Called every so often while a script runs."""

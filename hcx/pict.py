@@ -110,12 +110,14 @@ def _bits(cv, b, o, op, v2):
         cmp_count = struct.unpack_from(">H", b, o + 20)[0]
         o += 36
         if not direct:
-            n = struct.unpack_from(">H", b, o + 6)[0] + 1
+            ct_flags, n = struct.unpack_from(">HH", b, o + 4)
+            n += 1
+            device = bool(ct_flags & 0x8000)   # device table: the entry's position is its index
             pal = {}
             co = o + 8
             for i in range(n):
                 v, r, g, bl_ = struct.unpack_from(">HHHH", b, co)
-                pal[i if v >= 0x8000 or v > 255 else v] = (r >> 8, g >> 8, bl_ >> 8)
+                pal[i if device or v >= 0x8000 or v > 255 else v] = (r >> 8, g >> 8, bl_ >> 8)
                 co += 8
             o = co
     else:

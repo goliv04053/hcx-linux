@@ -72,6 +72,7 @@ class CardView(Gtk.Fixed):
         self.stack = stack
         self.renderer = Renderer(stack, self.get_pango_context())
         self.renderer.more_stacks = getattr(self, "more_stacks", None)
+        self.renderer.color_state = getattr(self, "color_state", None)
         self.card = None
         self.scroll = {}
         self.selected = None

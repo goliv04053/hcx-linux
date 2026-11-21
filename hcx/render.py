@@ -13,6 +13,8 @@ gi.require_version("Graphene", "1.0")
 gi.require_version("Pango", "1.0")
 from gi.repository import Gdk, GdkPixbuf, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
+from . import addcolor  # noqa: E402
+
 
 
 def rgba(r, g, b, a=1.0):
@@ -104,6 +106,7 @@ def content_hilite(c):
 
 class Renderer:
     more_stacks = None
+    color_state = None      # {"enabled": bool, "extra": [objects drawn by AddColor commands]}
 
     def __init__(self, stack, pango_context):
         self.stack = stack
@@ -268,12 +271,80 @@ class Renderer:
         self.overlays(card, bg)
         node = self.s.to_node()
         self.s = None
+        color = self.color_layer(card, bg) if not opts.get("outlines") else None
         out = Gtk.Snapshot()
         out.push_clip(R(0, 0, W, H))
-        if node:
+        if node and color:
+            # AddColor: the black-and-white card over the colors, white letting the color through
+            out.push_blend(Gsk.BlendMode.MULTIPLY)
+            out.append_node(color)
+            out.pop()
+            out.append_node(node)
+            out.pop()
+        elif node:
             out.append_node(node)
         out.pop()
         return out.to_node()
+
+    # -- color (AddColor) ------------------------------------------------------------
+    def color_layer(self, card, bg):
+        state = self.color_state or {}
+        if state.get("enabled") is False:
+            return None
+        table = addcolor.load(self.stack)
+        extra = [x for x in state.get("extra", []) if x.get("card") is card]
+        if not table and not extra:
+            return None
+        items = []
+        if table:
+            if bg is not None:
+                items += [("bg", it) for it in table["backgrounds"].get(addcolor.key(bg.id), [])]
+            if card is not None and not self.opts.get("bg_only"):
+                items += [("cd", it) for it in table["cards"].get(addcolor.key(card.id), [])]
+        items += [(x.get("layer", "cd"), x) for x in extra]
+        if not items:
+            return None
+        st = self.stack
+        s = Gtk.Snapshot()
+        fill(s, 0, 0, st.width, st.height, WHITE)
+        drew = False
+        for kind, it in items:
+            if it.get("hidden"):
+                continue
+            t = it["type"]
+            if t in ("button", "field"):
+                layer = bg if kind == "bg" else card
+                p = next((q for q in (layer.parts if layer else []) if q.type == t and q.id == it["id"]), None)
+                if p is None or not p.visible:
+                    continue
+                self._color_rect(s, p.left, p.top, p.width, p.height, it["rgb"], it.get("bevel", 0))
+                drew = True
+            elif t == "rect":
+                l, tp, r, b = it["rect"]
+                self._color_rect(s, l, tp, r - l, b - tp, it["rgb"], it.get("bevel", 0))
+                drew = True
+            elif t in ("pict", "pictfile") and it.get("file"):
+                path = it["file"] if os.path.isabs(it["file"]) else os.path.join(st.dir_path, it["file"])
+                tex = self.texture(path)
+                if tex:
+                    l, tp, r, b = it["rect"]
+                    w, h = (r - l, b - tp) if r > l and b > tp else (tex.get_width(), tex.get_height())
+                    s.append_scaled_texture(tex, Gsk.ScalingFilter.NEAREST, R(l, tp, w, h))
+                    drew = True
+        return s.to_node() if drew else None
+
+    @staticmethod
+    def _color_rect(s, x, y, w, h, c, bevel):
+        r, g, b = addcolor.rgb(c)
+        fill(s, x, y, w, h, rgba(r, g, b))
+        k = max(0, min(int(bevel or 0), w // 2, h // 2))
+        if k:
+            light = rgba(r + (1 - r) * 0.5, g + (1 - g) * 0.5, b + (1 - b) * 0.5)
+            dark = rgba(r * 0.55, g * 0.55, b * 0.55)
+            fill(s, x, y, w, k, light)
+            fill(s, x, y, k, h, light)
+            fill(s, x, y + h - k, w, k, dark)
+            fill(s, x + w - k, y, k, h, dark)
 
     def invert(self, x, y, w, h, oval=False, clip=None):
         """Queue an XOR of the area (applied once the part is drawn)."""

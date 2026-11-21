@@ -6,11 +6,12 @@ Usable from the command line too:  python3 -m hcx.stackimport STACK [OUTDIR]
 
 import hashlib
 import os
+import traceback
 import re
 import struct
 import sys
 
-from . import macfiles, resources, woba
+from . import addcolor, macfiles, resources, woba
 from .model import Content, Layer, Part, Stack, TEXT_STYLES, write_xml
 
 IMPORTER_VERSION = "2"
@@ -324,6 +325,11 @@ class StackImporter:
             # kept whole so scripts and externals can read STR/CSTR/TEXT resources
             with open(os.path.join(self.outdir, "_rsrc.bin"), "wb") as fh:
                 fh.write(self.mf.rsrc)
+            try:
+                addcolor.build(resources.parse_resource_fork(self.mf.rsrc), self.outdir,
+                               getattr(st, "source_path", None), self.mf.path)
+            except Exception:  # noqa: BLE001 - color is optional, the stack still opens without it
+                traceback.print_exc()
 
         # backgrounds (linked list)
         first_bg = u32(dec, 0x28)

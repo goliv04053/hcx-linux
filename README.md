@@ -12,10 +12,10 @@ HCX é um leitor de pilhas HyperCard do Mac clássico. Esta é a versão para Li
 | Capa do *Hitchhiker's Guide* (Voyager Expanded Book) | O menu de capítulos da paleta, feito em HyperTalk pela própria pilha |
 | ![Inspetor de objetos em português](docs/screenshots/inspector.png) | ![Menu de idioma em inglês](docs/screenshots/language-menu.png) |
 | O inspetor mostra as propriedades de botões, campos, cartões e da pilha | O idioma da interface pode ser trocado no menu |
-| ![Escolha de pilha em espanhol](docs/screenshots/choose-stack.png) | |
-| Uma imagem de disco com várias pilhas (interface em espanhol) | |
+| ![Escolha de pilha em espanhol](docs/screenshots/choose-stack.png) | ![Cartão colorido da pilha Tirada Celta](docs/screenshots/colors.png) |
+| Uma imagem de disco com várias pilhas (interface em espanhol) | Uma pilha colorida com o AddColor (*Tirada Celta*) |
 
-As capturas usam a pilha *The Hitchhiker's Guide to the Galaxy* da Voyager, que serviu de teste. O conteúdo dela pertence aos seus autores e não faz parte deste projeto.
+As capturas usam as pilhas *The Hitchhiker's Guide to the Galaxy* da Voyager e *Tirada Celta*, que serviram de teste. O conteúdo delas pertence aos seus autores e não faz parte deste projeto.
 
 ## Como rodar
 
@@ -79,9 +79,10 @@ Os **XCMDs/XFCNs** são código de máquina 68k do Mac e não rodam no Linux. Os
 - **Textos e recursos:** GetStr, Get1Str, SetStr, ResID, listOfResources (e os recursos CSTR, STR, TEXT e twtx da pilha)
 - **Menus e listas:** PopItUp e HPopUpMenu (menu suspenso no lugar do clique, com submenus), ListSelect, StripEm, CharInStr
 - **Janelas:** Picture (paletas e imagens PICT), TextXWindow (janelas de texto/ajuda), Movie (vídeo pelo GTK)
+- **Cores:** AddColor (botões, campos, retângulos e figuras coloridas, inclusive as cores já guardadas na pilha), colorizeHC, GetDepth
 - **Arquivos:** GetFilesInDir, GetFileSize, GetPathInfo, DeleteFile, CreateFolder, AppendDataToFile, AppendStyleDataToFile, GetFileIndexedEntry
 - **Texto e área de transferência:** SelectionToClip, AppendToClip, ChangeFontSizes, RemoveAttribute, RemoveUB, GetCharWidth, GetClickedWord, FontExists
-- **Sistema:** MainScreenRect, GetScreenRects, PlayAIFFFile; MaxMem e SetCustomIconBit não fazem nada (não precisam no Linux)
+- **Sistema:** MainScreenRect, GetScreenRects, PlayAIFFFile; MaxMem, SetDepth, HideDesktop e SetCustomIconBit não fazem nada (não precisam no Linux)
 
 Um XCMD que não está nessa lista é ignorado em silêncio, como se não tivesse feito nada.
 
