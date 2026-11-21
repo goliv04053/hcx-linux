@@ -347,9 +347,39 @@ def _finite(x, f):
     return fmt_num(f(x))
 
 
+DEFAULT_NUMBER_FORMAT = "0.######"
+_NUMFMT = [DEFAULT_NUMBER_FORMAT]
+
+
+def _apply_number_format(x, f):
+    """Format x like HyperCard's numberFormat: "0.00" (always two decimals),
+    "0.##" (up to two), "00" (at least two integer digits)…"""
+    ip, _, fp = f.partition(".")
+    min_int = ip.count("0")
+    min_frac = fp.count("0")
+    max_frac = len(fp)
+    s = "%.*f" % (max_frac, x)
+    if "." in s:
+        whole, frac = s.split(".")
+        frac = frac.rstrip("0")
+        frac = frac + "0" * (min_frac - len(frac))
+    else:
+        whole, frac = s, ""
+    neg = whole.startswith("-")
+    whole = whole.lstrip("-")
+    if whole == "0" and min_int == 0 and frac:
+        whole = ""
+    whole = whole.rjust(min_int, "0")
+    if neg and (whole.strip("0") or frac.strip("0")):
+        whole = "-" + whole
+    return whole + ("." + frac if frac else "")
+
+
 def fmt_num(x):
     if isinstance(x, bool):
         return TRUE if x else FALSE
+    if _NUMFMT[0] != DEFAULT_NUMBER_FORMAT and isinstance(x, (int, float)) and math.isfinite(x):
+        return _apply_number_format(float(x), _NUMFMT[0])
     if isinstance(x, int):
         return str(x)
     if isinstance(x, float):
@@ -564,7 +594,18 @@ class Interp:
         self.props = {"itemdelimiter": ",", "numberformat": "0.######", "lockscreen": FALSE,
                       "lockmessages": FALSE, "userlevel": "5", "cursor": "browse", "blindtyping": FALSE,
                       "powerkeys": FALSE, "textarrows": TRUE, "dragspeed": "0", "editbkgnd": FALSE,
-                      "language": "English", "lockrecent": FALSE, "usermodify": FALSE}
+                      "language": "English", "lockrecent": FALSE, "usermodify": FALSE,
+                      "lockerrordialogs": FALSE, "longwindowtitles": FALSE,
+                      "messagewatcher": "MessageWatcher", "variablewatcher": "VariableWatcher",
+                      "scripteditor": "ScriptEditor", "scripttextfont": "Monaco", "scripttextsize": "9",
+                      "tracedelay": "0", "printmargins": "0,0,0,0", "printtextalign": "left",
+                      "printtextfont": "Geneva", "printtextheight": "13", "printtextsize": "10",
+                      "printtextstyle": "plain", "dialingtime": "180", "dialingvolume": "7",
+                      # painting properties
+                      "brush": "8", "centered": FALSE, "filled": FALSE, "grid": FALSE, "linesize": "1",
+                      "multiple": FALSE, "multispace": "1", "pattern": "12", "polysides": "4",
+                      "textalign": "left", "textfont": "Geneva", "textheight": "16", "textsize": "12",
+                      "textstyle": "plain"}
         from . import xcmds
         self.xcmds = xcmds
 
@@ -616,6 +657,10 @@ class Interp:
         if self.depth == 0:
             self.steps = 0
             self.effect = None
+            # like HyperCard at idle time
+            self.props["itemdelimiter"] = ","
+            self.props["numberformat"] = DEFAULT_NUMBER_FORMAT
+            _NUMFMT[0] = DEFAULT_NUMBER_FORMAT
         objs = self.path_objects(target)
         prev_target = self.target
         if set_target:
@@ -690,7 +735,35 @@ class Interp:
             return True
         if name in ("arrowkey",):
             d = (params[0] if params else "").lower()
-            h.go_rel({"left": "prev", "right": "next", "up": "first", "down": "last"}.get(d, "next"), None)
+            if d == "up":
+                h.go_forth(None)
+            elif d == "down":
+                h.go_back(None)
+            elif d in ("left", "right"):
+                h.go_rel("prev" if d == "left" else "next", None)
+            return True
+        if name in ("returnkey", "enterkey"):
+            # run the statement typed in the message box
+            text = h.msg_text().strip()
+            if text:
+                self.do_text(text)
+            return True
+        if name == "keydown":
+            h.type_text(params[0] if params else "")
+            return True
+        if name == "returninfield":
+            h.type_text("\n")
+            return True
+        if name in ("enterinfield", "tabkey"):
+            h.close_field()
+            return True
+        if name == "functionkey":
+            n = str(params[0] if params else "").strip()
+            item = {"1": "Undo", "2": "Cut", "3": "Copy", "4": "Paste"}.get(n)
+            if item:
+                h.domenu(item, None)
+            return True
+        if name in ("controlkey", "commandkeydown", "appleevent", "errordialog"):
             return True
         if name == "help":
             return True
@@ -788,7 +861,7 @@ class Interp:
             z = to_num(p.expr())
             i = a
             while (i >= z) if down else (i <= z):
-                self.set_var(var, fmt_num(i))
+                self.set_var(var, str(int(i)) if float(i).is_integer() else repr(float(i)))
                 if not loop_once():
                     break
                 try:
@@ -850,6 +923,8 @@ class Interp:
                 return c.text if c else ""
             if ref.t == "menu":
                 return "\n".join(i[0] for i in self.host.menu_items(ref.a))
+            if ref.t == "menuitem":
+                return self.host.menu_item_prop(ref.a, ref.b, "name")
             return self.obj_name(ref, "long")
         return str(ref)
 
@@ -970,6 +1045,14 @@ class Interp:
             if prop in self.props:
                 return self.props[prop]
             raise HTError("Unknown property " + prop)
+        if o.t == "menuitem":
+            return h.menu_item_prop(o.a, o.b, prop.split()[-1] if prop.endswith("name") else prop)
+        if o.t == "menu":
+            return h.menu_prop(o.a, prop)
+        if prop == "owner" and o.t == "card":
+            return self.obj_name(Obj("bg", h.bg_of(o.a)))
+        if prop == "owner" and o.t == "bg":
+            return self.obj_name(Obj("stack", h.stack))
         if prop in ("name", "short name", "long name", "abbr name", "abbrev name", "abbreviated name"):
             form = prop.split()[0] if " " in prop else "abbr"
             form = {"abbrev": "abbr", "abbreviated": "abbr"}.get(form, form)
@@ -1106,6 +1189,8 @@ class Interp:
                 self.props[prop] = value
                 h.set_cursor(value)
                 return
+            if prop == "numberformat":
+                _NUMFMT[0] = str(value) or DEFAULT_NUMBER_FORMAT
             self.props[prop] = value
             return
         if o.t == "part":
@@ -1405,6 +1490,29 @@ class Interp:
         except HTError:
             return [words[1]]
 
+    def do_text(self, src):
+        """Run what was typed in the message box: a statement, or an
+        expression whose value goes back into the message box."""
+        toks = tokenize(src)
+        if toks and len(src.split("\n")) == 1:
+            w = toks[0].low
+            me = self.frame.me if self.frame else None
+            is_cmd = toks[0].kind == "word" and (hasattr(self, "cmd_" + w) or self.handles(w, me) or
+                                                  self.xcmds.command(w) is not None or
+                                                  w in ("if", "repeat", "global"))
+            if not is_cmd:
+                try:
+                    v = Parser(self, toks, 0).expr()
+                except HTError:
+                    v = None
+                if v is not None:
+                    self.host.set_msg(v)
+                    return
+        sc = Script("on __do__\n%s\nend __do__" % src)
+        h = sc.handlers.get("__do__")
+        if h:
+            self.call(h, None, [], "do")
+
     def cmd_do(self, toks):
         src = Parser(self, toks, 1).expr()
         sc = Script("on __do__\n%s\nend __do__" % src)
@@ -1629,7 +1737,20 @@ class Interp:
                 self.host.click_at(v[0], v[1])
 
     def cmd_type(self, toks):
+        p = Parser(self, toks, 1)
+        text = p.expr(stop=("with",))
+        self.host.type_text(text)
+
+    def cmd_reply(self, toks):
         return
+
+    def cmd_request(self, toks):
+        # AppleEvents to other programs don't exist on Linux
+        self.set_var("it", "")
+        self.result = "No reply"
+
+    def cmd_copy(self, toks):
+        return  # "copy template": report templates are not supported
 
     def cmd_delete(self, toks):
         p = Parser(self, toks, 1)
@@ -1834,15 +1955,23 @@ class Interp:
         while not p.at_end() and p.peek_low() != "to":
             p.next()
         if p.at_end():
-            return
+            raise HTError("Expected \"to\"")
         p.next()
         fmt = " ".join(t.low for t in toks[p.i:])
         v = self.value_of(ref)
         try:
-            secs = float(v) if is_number(v) else time.mktime(_parse_date(v))
-        except Exception:  # noqa: BLE001
+            secs = _parse_date(v)
+        except (ValueError, OverflowError):
+            self.result = "Invalid date"
             return
-        self.put_into(ref, _format_date(secs, fmt))
+        out = _format_date(secs, fmt)
+        if out is None:
+            raise HTError("Unknown date format: " + fmt)
+        self.result = ""
+        if isinstance(ref, _Literal):
+            self.set_var("it", out)
+        else:
+            self.put_into(ref, out)
 
     def cmd_save(self, toks):
         return
@@ -2233,6 +2362,9 @@ class Parser:
         if name == "number" and self.peek_low() == "of":
             self.next()
             return self.number_of()
+        if self.peek_low() == "of" and self.peek_low(1) == "hypercard":
+            self.i += 2
+            return self.no_arg_function(name)
         if self.peek_low() == "of" and name not in _THE_NOARG_STRICT:
             self.next()
             return self.prop_of(name)
@@ -2244,6 +2376,9 @@ class Parser:
         """After `<prop> of`: a property of an object or chunk, or a
         one-argument function written as `the f of x`."""
         it = self.it
+        if self.peek_low() == "hypercard":
+            self.next()
+            return self.no_arg_function(name)
         if name == "number":
             return self.number_of()
         fn = _FUNCS_OF.get(name)
@@ -2368,10 +2503,8 @@ class Parser:
             return str(_random.randint(1, 100))
         if n in ("number",):
             return "0"
-        if n in ("lockscreen", "lockmessages", "lockrecent", "itemdelimiter", "numberformat", "userlevel",
-                 "cursor", "blindtyping", "powerkeys", "textarrows", "editbkgnd", "dragspeed", "language",
-                 "usermodify"):
-            return it.props.get(n, "")
+        if n in it.props:
+            return it.props[n]
         if n in ("address",):
             return "HyperCard"
         if n in ("environment",):
@@ -2412,12 +2545,20 @@ class Parser:
             self.next()
             return "2"
         if w in OBJ_WORDS:
-            typ = OBJ_WORDS[self.next().low]
+            start = self.i
+            word = self.next().low
+            typ = OBJ_WORDS[word]
             layer_kind = None
             if typ in ("card", "bg") and self.peek_low() in ("button", "buttons", "btn", "btns",
                                                              "field", "fields", "fld", "flds", "part", "parts"):
                 layer_kind = "cd" if typ == "card" else "bg"
-                typ = OBJ_WORDS[self.next().low]
+                word = self.next().low
+                typ = OBJ_WORDS[word]
+            if word in _SINGULAR_OBJ_WORDS and typ != "stack":
+                # "the number of card button 3": the number of one object
+                self.i = start
+                o = self.object_ref()
+                return str(it.obj_number(o)) if o is not None else "0"
             if typ == "card":
                 if self.peek_low() in ("in", "of"):
                     self.next()
@@ -2911,34 +3052,70 @@ def _is_type(v, typ):
     return False
 
 
+_DATE_FMTS = ("%m/%d/%y", "%m/%d/%Y", "%A, %B %d, %Y", "%a, %b %d, %Y", "%B %d, %Y", "%b %d, %Y",
+              "%A, %b %d, %Y", "%a, %B %d, %Y", "%m-%d-%y", "%m-%d-%Y", "%Y-%m-%d")
+_TIME_FMTS = ("%I:%M %p", "%I:%M:%S %p", "%H:%M", "%H:%M:%S", "%I:%M%p", "%I:%M:%S%p")
+
+
 def _parse_date(v):
-    for fmt in ("%m/%d/%y", "%m/%d/%Y", "%A, %B %d, %Y", "%a, %b %d, %Y", "%B %d, %Y", "%I:%M %p",
-                "%I:%M:%S %p"):
+    """A HyperCard date, time, date and time, dateItems or seconds value,
+    as Unix seconds in local time."""
+    v = " ".join(str(v).split())
+    if is_number(v):
+        return float(v) - 2082844800
+    parts = v.split(",")
+    if len(parts) in (6, 7) and all(is_number(x) for x in parts):
+        y, mo, d, hh, mi, ss = (int(to_num(x)) for x in parts[:6])
+        if y < 100:
+            y += 1900 if y >= 20 else 2000
+        return time.mktime((y, mo, d, hh, mi, ss, 0, 0, -1))
+    for df in _DATE_FMTS:
+        for tf in ("",) + _TIME_FMTS:
+            try:
+                t = time.strptime(v, (df + " " + tf).strip())
+            except ValueError:
+                continue
+            return time.mktime(t[:8] + (-1,))
+    for tf in _TIME_FMTS:
         try:
-            return time.strptime(v.strip(), fmt)
+            t = time.strptime(v, tf)
         except ValueError:
             continue
+        now = time.localtime()
+        return time.mktime((now.tm_year, now.tm_mon, now.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, 0, 0, -1))
     raise ValueError(v)
 
 
-def _format_date(secs, fmt):
-    if "seconds" in fmt:
-        return str(int(secs) + 2082844800)
-    t = time.localtime(secs)
-    if "long date" in fmt:
-        return time.strftime("%A, %B %-d, %Y", t)
-    if "abbr" in fmt and "date" in fmt:
-        return time.strftime("%a, %b %-d, %Y", t)
-    if "date" in fmt:
-        return time.strftime("%-m/%-d/%y", t)
-    if "long time" in fmt:
-        return time.strftime("%-I:%M:%S %p", t)
-    if "time" in fmt:
-        return time.strftime("%-I:%M %p", t)
-    if "dateitems" in fmt:
+def _format_one(t, secs, fmt):
+    fmt = fmt.strip()
+    if fmt in ("seconds", "secs", "second"):
+        return str(int(round(secs)) + 2082844800)
+    if fmt == "dateitems":
         return ",".join(str(x) for x in (t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec,
                                          (t.tm_wday + 1) % 7 + 1))
-    return str(int(secs))
+    if fmt == "long date":
+        return time.strftime("%A, %B %-d, %Y", t)
+    if fmt in ("abbr date", "abbrev date", "abbreviated date"):
+        return time.strftime("%a, %b %-d, %Y", t)
+    if fmt in ("date", "short date"):
+        return time.strftime("%-m/%-d/%y", t)
+    if fmt == "long time":
+        return time.strftime("%-I:%M:%S %p", t)
+    if fmt in ("time", "short time", "abbr time", "abbrev time", "abbreviated time"):
+        return time.strftime("%-I:%M %p", t)
+    return None
+
+
+def _format_date(secs, fmt):
+    t = time.localtime(secs)
+    fmt = " ".join(fmt.lower().split())
+    out = []
+    for piece in fmt.split(" and "):
+        r = _format_one(t, secs, piece)
+        if r is None:
+            return None
+        out.append(r)
+    return " ".join(out)
 
 
 # built-in functions -----------------------------------------------------------------
@@ -2971,6 +3148,12 @@ def _value(it, a):
         return src
 
 
+def _annuity(rate, periods):
+    if rate == 0:
+        return periods
+    return (1 - (1 + rate) ** -periods) / rate
+
+
 _BUILTIN = {
     "length": lambda it, a: str(len(a[0]) if a else 0),
     "len": lambda it, a: str(len(a[0]) if a else 0),
@@ -2992,6 +3175,10 @@ _BUILTIN = {
     "ln": lambda it, a: fmt_num(math.log(to_num(a[0]))),
     "log2": lambda it, a: fmt_num(math.log2(to_num(a[0]))),
     "exp2": lambda it, a: fmt_num(2 ** to_num(a[0])),
+    "exp1": lambda it, a: fmt_num(math.expm1(to_num(a[0]))),
+    "ln1": lambda it, a: fmt_num(math.log1p(to_num(a[0]))),
+    "annuity": lambda it, a: fmt_num(_annuity(to_num(a[0]), to_num(a[1]))) if len(a) > 1 else "0",
+    "compound": lambda it, a: fmt_num((1 + to_num(a[0])) ** to_num(a[1])) if len(a) > 1 else "0",
     "chartonum": lambda it, a: str(ord(a[0][0])) if a and a[0] else "0",
     "numtochar": lambda it, a: chr(int(to_num(a[0]))) if a else "",
     "value": _value,
@@ -3005,7 +3192,7 @@ _BUILTIN = {
 
 _FUNCS_OF = {k: v for k, v in _BUILTIN.items() if k in (
     "length", "abs", "round", "trunc", "random", "sqrt", "sin", "cos", "tan", "atan", "exp", "ln",
-    "chartonum", "numtochar", "value", "log2", "exp2")}
+    "chartonum", "numtochar", "value", "log2", "exp2", "exp1", "ln1")}
 
 _NOARG = {"date", "time", "seconds", "ticks", "secs", "version", "result", "target", "selection",
           "mouse", "mouseh", "mousev", "mouseloc", "clickh", "clickv", "clickloc", "screenrect",
@@ -3027,9 +3214,16 @@ _THE_NOARG_STRICT = {"date", "time", "seconds", "ticks", "secs", "version", "res
                      "foundtext", "foundchunk", "foundline", "foundfield", "clicktext", "clickline",
                      "clickchunk", "systemversion", "platform", "diskspace", "heapspace"}
 
+_SINGULAR_OBJ_WORDS = {"card", "cd", "bg", "bkgnd", "background", "button", "btn", "field", "fld", "part"}
+
 _THE_PROPS_NO_OBJ = {"itemdelimiter", "numberformat", "lockscreen", "lockmessages", "userlevel", "cursor",
                      "blindtyping", "powerkeys", "textarrows", "editbkgnd", "dragspeed", "language",
-                     "lockrecent", "usermodify"}
+                     "lockrecent", "usermodify", "lockerrordialogs", "longwindowtitles", "messagewatcher",
+                     "variablewatcher", "scripteditor", "scripttextfont", "scripttextsize", "tracedelay",
+                     "printmargins", "printtextalign", "printtextfont", "printtextheight", "printtextsize",
+                     "printtextstyle", "dialingtime", "dialingvolume", "brush", "centered", "filled", "grid",
+                     "linesize", "multiple", "multispace", "pattern", "polysides", "textalign", "textfont",
+                     "textheight", "textsize", "textstyle"}
 
 _MULTIWORD_PROPS = {"short name", "long name", "abbr name", "abbrev name", "abbreviated name", "short id",
                     "long id", "short date", "long date", "abbr date", "short time", "long time",

@@ -188,6 +188,9 @@ class HostMixin:
     def go_back(self, effect=None):
         pass
 
+    def go_forth(self, effect=None):
+        pass
+
     def go_home(self, effect=None):
         st = self.find_stack("Home", load=True)
         if st is not None and st is not self.stack:
@@ -225,6 +228,9 @@ class HostMixin:
         it.result = ""
         if w == "back" or w == "recent":
             self.go_back(effect)
+            return
+        if w in ("forth", "forward"):
+            self.go_forth(effect)
             return
         if w == "home":
             self.go_home(effect)
@@ -471,6 +477,14 @@ class HostMixin:
 
     def selection_text(self):
         return ""
+
+    def type_text(self, text):
+        """`type`/keyDown: insert text where the insertion point is."""
+        pass
+
+    def close_field(self):
+        """enterInField/tabKey: stop editing the field."""
+        pass
 
     # -- dialogs ------------------------------------------------------------------------------
     def answer(self, text, buttons):
@@ -814,6 +828,16 @@ class HostMixin:
         elif prop in ("commandchar", "cmdchar"):
             x[4] = str(value).strip()[:1]
         self.menus_changed()
+
+    def menu_prop(self, menu, prop):
+        m = self._menu(menu)
+        if m is None:
+            return ""
+        if prop in ("name", "short name", "long name", "abbr name"):
+            return m[0] if prop != "long name" else 'menu "%s"' % m[0]
+        if prop == "enabled":
+            return ht.b(m[2])
+        return ""
 
     def set_menu_prop(self, menu, prop, value):
         m = self._menu(menu)

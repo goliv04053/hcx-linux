@@ -374,6 +374,7 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
                 self.interp.props.get("lockrecent") != "true":
             self.history.append(self.index)
             del self.history[:-200]
+            self.forth = []
         self.index = index
         if index != getattr(self, "_found_index", None):
             self.view.found = None
@@ -395,7 +396,14 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
 
     def go_back(self, effect=None):
         if self.history:
+            self.forth = getattr(self, "forth", []) + [self.index]
             self.go(self.history.pop(), record=False, effect=effect)
+
+    def go_forth(self, effect=None):
+        forth = getattr(self, "forth", [])
+        if forth:
+            self.history.append(self.index)
+            self.go(forth.pop(), record=False, effect=effect)
 
     def _update_title(self):
         st = self.stack
@@ -621,6 +629,16 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         fd = Pango.FontDescription.from_string("%s %dpx" % (linux_family(font), size))
         lay.set_font_description(fd)
         return lay.get_pixel_size()[0]
+
+    def type_text(self, text):
+        ed = getattr(self.view, "editing", None)
+        tv = ed[3] if ed and len(ed) > 3 and isinstance(ed[3], Gtk.TextView) else None
+        if tv is not None and text:
+            tv.get_buffer().insert_at_cursor(str(text).replace("\r", "\n"))
+
+    def close_field(self):
+        if getattr(self.view, "editing", None):
+            self.view.finish_editing()
 
     def selection_text(self):
         ed = getattr(self.view, "editing", None)
@@ -1209,6 +1227,7 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         old_index = self.index
         self.stack = st
         self.history = []
+        self.forth = []
         self._told_modified = False
         self.dirty = False
         self._search_pos = None
