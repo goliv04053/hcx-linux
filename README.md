@@ -62,7 +62,7 @@ Na primeira vez a pilha é convertida para um pacote `.hcxs`, guardado em `~/.lo
 - **Buscar (Ctrl+F):** procura o texto em todos os campos de todos os cartões, como o Find do HyperCard, e marca a palavra encontrada. Enter ou Ctrl+G vai para a próxima ocorrência.
 - **Salvar (Ctrl+S):** guarda as edições (texto dos campos, botões e campos movidos, propriedades do inspetor). Elas continuam lá quando você abrir a pilha de novo. Ao fechar uma janela com alterações, o programa pergunta se quer salvar.
 - **Imprimir cartão (Ctrl+P)** pelo diálogo de impressão do GNOME (também serve para gerar PDF), **copiar o cartão como imagem** (Ctrl+Shift+C) e **exportar o cartão como PNG**
-- **Sons:** os sons da pilha tocam pelo sistema de som do Linux (GStreamer). No inspetor, aba Pilha, há um botão para ouvir cada um.
+- **Sons:** os sons da pilha tocam pelo sistema de som do Linux (GStreamer). Os sons comprimidos do Mac (MACE 3:1, MACE 6:1 e IMA 4:1), dentro da pilha ou em arquivos AIFF-C, são convertidos na hora. No inspetor, aba Pilha, há um botão para ouvir cada um.
 - **Menu:** codificação do texto (Automática, Mac Roman ou Shift-JIS para pilhas japonesas), reimportar, exportar pacote `.hcxs`, nova janela (Ctrl+N)
 
 ## HyperTalk e XCMDs
@@ -98,7 +98,6 @@ O *Hitchhiker's Guide* abre com a paleta de controles e o menu Books. Funcionam:
 
 - **Fontes:** o Linux não tem as fontes bitmap do Mac (Chicago, Geneva, New York…). Elas são trocadas por Sans, Serif e Monospace do sistema, então algum texto pode quebrar a linha num lugar um pouco diferente.
 - **As alterações vão para o pacote `.hcxs`, não para o arquivo HyperCard original**, que nunca é modificado. "Exportar pacote .hcxs…" faz uma cópia em outra pasta.
-- Sons comprimidos (MACE/IMA) ainda não são convertidos e tocam como um bipe. Cores (AddColor) não são mostradas.
 - Imagens HFS+ (Mac OS Estendido) ainda não são lidas. Só as imagens HFS clássicas.
 - Partes do HyperTalk que dependem do Mac (AppleEvents, `the mouse` fora da janela, impressão de relatórios, paleta de pintura) não fazem nada.
 

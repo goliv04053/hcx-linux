@@ -14,6 +14,7 @@ Pull requests and issues are welcome in English too.*
 - Os XCMDs/XFCNs mais comuns reescritos em Python (lista no README)
 - Interface em português, espanhol e inglês
 - Testado com as coleções HyperCardVol1 e HyperCardVol2 (178 pilhas de jogos, livros, clip-art e utilitários): todas abrem
+- Sons comprimidos do Mac (MACE 3:1, MACE 6:1 e IMA 4:1)
 - Cores das pilhas feitas com as Color Tools do HyperCard 2 (XCMD AddColor): botões, campos, retângulos e figuras coloridas aparecem como no Mac
 - Jogos que ficam num laço esperando o clique (`repeat until the mouseClick`) funcionam, e a janela continua respondendo enquanto um script roda. Esc para um script que não termina.
 
@@ -34,7 +35,7 @@ dependem das outras mensagens do sistema.
 
 ## 3.2: som, cor e fontes
 
-- [ ] Sons comprimidos MACE 3:1, MACE 6:1 e IMA 4:1 (hoje tocam como um bipe)
+- [x] Sons comprimidos MACE 3:1, MACE 6:1 e IMA 4:1
 - [x] Cores: os XCMDs AddColor e colorizeHC e os recursos de cor que eles usam (são os externos mais usados nas coleções testadas)
 - [ ] Fala: `speak` e os XCMDs de fala (Vocalise, say) usando o speech-dispatcher do Linux
 - [ ] QuickTime: QTPict e os XCMDs de filme

@@ -8,7 +8,7 @@ import traceback
 
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
 
-from . import addcolor, macfiles
+from . import addcolor, macfiles, macsound
 from .cardview import CardView
 from . import i18n
 from .i18n import N_, _
@@ -48,6 +48,25 @@ def _media_ok():
                 ok = any(os.path.exists(os.path.join(d, "libgstplayback.so")) for d in dirs)
         _MEDIA_OK.append(ok)
     return _MEDIA_OK[0]
+
+
+def _sound_from_data(path):
+    """Packages imported by older versions kept compressed (MACE/IMA) sounds as raw
+    'snd ' data: convert one to WAV next to it the first time it is played."""
+    wav = os.path.join(os.path.dirname(path), "SND_" + os.path.basename(path)[4:-5] + ".wav")
+    if os.path.exists(wav):
+        return wav
+    try:
+        from .resources import snd_wav
+        with open(path, "rb") as fh:
+            blob = snd_wav(fh.read())
+        if not blob:
+            return path
+        with open(wav, "wb") as fh:
+            fh.write(blob)
+        return wav
+    except Exception:  # noqa: BLE001 - a bad sound must not stop the script
+        return path
 
 
 class HCXWindow(Adw.ApplicationWindow, HostMixin):
@@ -583,6 +602,8 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
                     continue
                 if m["name"].lower() == low or str(m["id"]) == low:
                     path = os.path.join(s_.dir_path, m["file"])
+                    if path.endswith(".data"):
+                        path = _sound_from_data(path)
                     break
             if path:
                 break
@@ -593,6 +614,7 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         self.play_file(path)
 
     def play_file(self, path):
+        path = macsound.playable(path)
         if not _media_ok():
             # GTK's GStreamer backend aborts the program when GStreamer's playback plugins are missing
             for tool in ("pw-play", "paplay", "aplay"):

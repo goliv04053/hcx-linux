@@ -230,7 +230,7 @@ def _wav(rate, channels, bits, frames_le):
 
 
 def snd_wav(b):
-    """'snd ' format 1/2 with sampled sound (uncompressed) -> WAV bytes."""
+    """'snd ' format 1/2 with sampled sound -> WAV bytes (compressed sound is decoded too)."""
     fmt = _u16(b, 0)
     o = 2
     if fmt == 1:
@@ -270,7 +270,43 @@ def snd_wav(b):
             le[0::2] = raw[1::2]
             le[1::2] = raw[0::2]
             return _wav(rate, ch, 16, bytes(le))
-    return None  # compressed (MACE/IMA): not converted, kept raw
+    if encode == 0xFE:
+        return _snd_compressed(b, hdr, rate)
+    return None
+
+
+_CMP_IDS = {3: "MAC3", 4: "MAC6"}
+
+
+def _snd_compressed(b, hdr, rate):
+    """Compressed sound header (MACE 3:1 / 6:1, IMA 4:1, 16-bit) -> WAV bytes."""
+    from . import macsound
+    ch = max(1, min(2, _u32(b, hdr + 4)))
+    frames = _u32(b, hdr + 22)
+    fmt = b[hdr + 40:hdr + 44].decode("mac_roman", "replace")
+    cid = struct.unpack_from(">h", b, hdr + 56)[0]
+    fmt = _CMP_IDS.get(cid, fmt)
+    data = b[hdr + 64:]
+    if fmt in ("twos", "sowt") or (cid in (0, -1, -2) and fmt == "NONE"):
+        bits = struct.unpack_from(">h", b, hdr + 62)[0]
+        if bits == 8:
+            return _wav(rate, ch, 8, bytes((x + 128) & 0xFF for x in data[:frames * ch]))
+        raw = data[:frames * ch * 2]
+        if fmt == "sowt":
+            return _wav(rate, ch, 16, raw)
+        le = bytearray(len(raw))
+        le[0::2] = raw[1::2]
+        le[1::2] = raw[0::2]
+        return _wav(rate, ch, 16, bytes(le))
+    per = {"MAC3": 2, "MAC6": 1, "ima4": 34}.get(fmt)
+    if per is None:
+        return None
+    if frames:   # numFrames counts packets for compressed sound
+        data = data[:frames * per * ch]
+    pcm = macsound.decode(fmt, data, ch)
+    if not pcm:
+        return None
+    return _wav(rate, ch, 16, pcm)
 
 
 def convert_resources(rsrc, outdir):

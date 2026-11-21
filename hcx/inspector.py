@@ -189,7 +189,7 @@ class Inspector(Gtk.Box):
             for m in sounds:
                 r = Adw.ActionRow(title=GLib.markup_escape_text(m["name"] or "#%d" % m["id"]),
                                   subtitle="ID %d" % m["id"])
-                if (m.get("file") or "").endswith(".wav"):
+                if (m.get("file") or "").endswith((".wav", ".data")):
                     b = Gtk.Button(icon_name="media-playback-start-symbolic", valign=Gtk.Align.CENTER,
                                    css_classes=["flat"], tooltip_text=_("Play"))
                     b.connect("clicked", lambda _b, name=m["name"] or str(m["id"]): self.on_play(name))
