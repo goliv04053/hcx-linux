@@ -2,6 +2,7 @@
 `_stack.xml` reader/writer (same layout HCX's stackimport produced)."""
 
 import os
+import re
 import xml.etree.ElementTree as ET
 
 BUTTON_STYLES = ["standard", "transparent", "opaque", "rectangle", "shadow", "roundrect",
@@ -135,10 +136,25 @@ class Stack:
 # XML
 # ---------------------------------------------------------------------------
 
+# XML 1.0 can't hold most control characters, but old scripts do contain
+# them (e.g. `if k = "^E"` with a raw Ctrl-E). They are stored as private-use
+# characters U+F700+code and turned back when the package is read.
+_XML_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+_XML_PUA = re.compile("[\uf700-\uf71f]")
+
+
+def _xml_safe(text):
+    return _XML_BAD.sub(lambda m: chr(0xF700 + (ord(m.group(0)) & 0x1F)), text)
+
+
+def _xml_unsafe(text):
+    return _XML_PUA.sub(lambda m: chr(ord(m.group(0)) - 0xF700), text)
+
+
 def _sub(parent, tag, text=None):
     e = ET.SubElement(parent, tag)
     if text is not None:
-        e.text = str(text)
+        e.text = _xml_safe(str(text))
     return e
 
 
@@ -324,7 +340,7 @@ def _t(e, tag, default=""):
     c = e.find(tag)
     if c is None or c.text is None:
         return default
-    return c.text
+    return _xml_unsafe(c.text)
 
 
 def _i(e, tag, default=0):
@@ -423,8 +439,13 @@ def _read_layer(e, kind):
 
 
 def read_xml(dir_path):
-    tree = ET.parse(os.path.join(dir_path, "_stack.xml"))
-    root = tree.getroot()
+    with open(os.path.join(dir_path, "_stack.xml"), encoding="utf-8", errors="replace") as fh:
+        data = fh.read()
+    # packages written before control characters were escaped
+    data = _XML_BAD.sub(lambda m: chr(0xF700 + (ord(m.group(0)) & 0x1F)), data)
+    if data.startswith("<?xml"):
+        data = data[data.index("?>") + 2:]
+    root = ET.fromstring(data)
     st = Stack()
     st.dir_path = dir_path
     s = root.find("stack")

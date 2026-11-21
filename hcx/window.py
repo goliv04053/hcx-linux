@@ -15,6 +15,7 @@ from .i18n import N_, _
 from .inspector import Inspector
 from . import scriptui
 from .hthost import HostMixin
+from . import hypertalk as ht
 from .hypertalk import Obj
 from .model import Content, read_xml, write_xml
 from .stackimport import import_stack
@@ -44,6 +45,9 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         self._pending_effect = None
         self._script_wins = {}
         self._script_dirty = {}
+        self._script_t0 = None
+        self._stop_hint_shown = False
+        self._abort_script = False
         self._menu_gen = 0
         self._menus_queued = False
         self._sounds = []
@@ -152,6 +156,7 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         self.view = CardView()
         self.view.more_stacks = lambda: list(getattr(self, "stacks_using", []))
         self.view.connect("message", self._on_message)
+        self.view.busy = self.script_busy
         self.view.connect("selection-changed", lambda *_: self._sync_selection())
         self.view.connect("modified", lambda *_: self._on_modified())
         frame = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
@@ -231,10 +236,10 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         def add(name, cb, param=None, state=None):
             if state is not None:
                 a = Gio.SimpleAction.new_stateful(name, param, state)
-                a.connect("change-state", cb)
+                a.connect("change-state", lambda *x: None if self.script_busy() else cb(*x))
             else:
                 a = Gio.SimpleAction.new(name, param)
-                a.connect("activate", cb)
+                a.connect("activate", lambda *x: None if self.script_busy() else cb(*x))
             self.add_action(a)
             return a
 
@@ -317,6 +322,10 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
 
     # -- keyboard -------------------------------------------------------------------------
     def _on_key(self, ctl, keyval, keycode, state):
+        if self.script_busy():
+            if keyval == Gdk.KEY_Escape or (keyval == Gdk.KEY_period and state & Gdk.ModifierType.CONTROL_MASK):
+                self._abort_script = True
+            return True
         if not self.stack or self._loading:
             return False
         focus = self.get_focus()
@@ -428,6 +437,9 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         return self.stack.bg_by_id(card.bg_id) if card and self.stack else None
 
     def _on_message(self, view, msg, target):
+        if self.script_busy():
+            return
+        view.pending_click = False      # this click is the one being handled, not a later mouseClick
         if view.click:
             cx, cy, kind, p, layer = view.click
             self._click = (cx, cy)
@@ -516,6 +528,9 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
 
     def after_script(self):
         HostMixin.after_script(self)
+        self._script_t0 = None
+        self._stop_hint_shown = False
+        self._abort_script = False
         if self.view.locked is not None:
             self.lock_screen(False)
 
@@ -570,26 +585,71 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
             self._idle_off = st     # a slow idle handler would make the window sluggish
         return True
 
-    def mouse_is_down(self):
-        # Scripts poll "the mouse" in loops: let GTK deliver the button release.
+    # -- a script is running ---------------------------------------------------------------------
+    # The window keeps drawing and taking clicks while a script runs (games loop on `the mouseClick`),
+    # but clicks and keys don't start other handlers. Esc or Ctrl+. stops the script, as Cmd-. did.
+    max_steps = 0        # no step limit: the user can stop a runaway script
+
+    def script_busy(self):
+        return self.interp.depth > 0
+
+    def _pump(self, n=20):
         ctx = GLib.MainContext.default()
-        for _ in range(20):
+        for _ in range(n):
             if not ctx.iteration(False):
                 break
+        if self._abort_script:
+            self._abort_script = False
+            raise ht._Exit("hypercard")
+
+    def poll(self):
+        now = GLib.get_monotonic_time()
+        if self._script_t0 is None:
+            self._script_t0 = now
+        elif not self._stop_hint_shown and now - self._script_t0 > 4_000_000:
+            self._stop_hint_shown = True
+            self.toast(_("A script is running. Press Esc to stop it."), timeout=5)
+        self._pump()
+
+    def mouse_is_down(self):
+        # Scripts poll "the mouse" in loops: let GTK deliver the button release.
+        self._pump()
         return HostMixin.mouse_is_down(self)
+
+    def mouse_clicked(self):
+        self._pump()
+        clicked = self.view.pending_click
+        self.view.pending_click = False
+        if clicked:
+            self._click = self.view.script_click
+        return clicked
+
+    def mouse_loc(self):
+        xy = getattr(self.view, "_last_xy", None)
+        if not xy or not self.view.card:
+            return self._click
+        cx, cy = self.view.to_card(*xy)
+        return int(cx), int(cy)
 
     def wait(self, secs):
         end = GLib.get_monotonic_time() + int(secs * 1e6)
         ctx = GLib.MainContext.default()
         while GLib.get_monotonic_time() < end:
             ctx.iteration(False)
+            if self._abort_script:
+                self._abort_script = False
+                raise ht._Exit("hypercard")
             GLib.usleep(10000)
 
     def answer(self, text, buttons):
-        return scriptui.answer(self, text, buttons)
+        r = scriptui.answer(self, text, buttons)
+        self._script_t0 = None      # time spent in a dialog doesn't count as a busy script
+        return r
 
     def ask(self, prompt, default="", password=False):
-        return scriptui.ask(self, prompt, default, password)
+        r = scriptui.ask(self, prompt, default, password)
+        self._script_t0 = None
+        return r
 
     def list_select(self, prompt, lines, multiple=False):
         return scriptui.list_select(self, prompt, lines, multiple)
@@ -722,7 +782,8 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
                 else:
                     act = Gio.SimpleAction.new(an, None)
                 act.set_enabled(bool(item[2]) and bool(m[2]))
-                act.connect("activate", self._script_menu_item, m[0], item[0])
+                act.connect("activate", lambda *x: None if self.script_busy() else self._script_menu_item(*x),
+                            m[0], item[0])
                 self.add_action(act)
                 self._menu_actions.append(an)
                 section.append(item[0], "win." + an)

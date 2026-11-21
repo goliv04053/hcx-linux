@@ -13,6 +13,8 @@ Pull requests and issues are welcome in English too.*
 - Interpretador HyperTalk: cerca de 570 comandos, funções e propriedades da referência 2.4 testados
 - Os XCMDs/XFCNs mais comuns reescritos em Python (lista no README)
 - Interface em português, espanhol e inglês
+- Testado com as coleções HyperCardVol1 e HyperCardVol2 (178 pilhas de jogos, livros, clip-art e utilitários): todas abrem
+- Jogos que ficam num laço esperando o clique (`repeat until the mouseClick`) funcionam, e a janela continua respondendo enquanto um script roda. Esc para um script que não termina.
 
 ## Próxima versão (3.1): pilhas que reagem ao usuário
 
@@ -24,7 +26,7 @@ dependem das outras mensagens do sistema.
 - [ ] Mandar `openField`, `closeField`, `exitField`, `returnInField` e `enterInField` ao editar um campo
 - [ ] `mouseDoubleClick`
 - [ ] Caixa de mensagens (Message Box) para digitar comandos HyperTalk, como no Mac (Ctrl+M)
-- [ ] `put … before/after menuItem …`
+- [ ] Teclado em jogos: XFCNs que leem a tecla apertada enquanto o script roda (`inKey`, `the keysDown`)
 - [ ] `select` (texto, linhas e objetos) e `choose tool` vindos de scripts
 - [ ] `flash`, `drag` e `move` (hoje não fazem nada)
 - [ ] `play` com notas e tempo (`play "harpsichord" tempo 200 "c4 d e"`); hoje toca só o som
@@ -32,7 +34,9 @@ dependem das outras mensagens do sistema.
 ## 3.2: som, cor e fontes
 
 - [ ] Sons comprimidos MACE 3:1, MACE 6:1 e IMA 4:1 (hoje tocam como um bipe)
-- [ ] Cores: o XCMD AddColor e os recursos de cor que ele usa
+- [ ] Cores: os XCMDs AddColor e colorizeHC e os recursos de cor que eles usam (são os externos mais usados nas coleções testadas)
+- [ ] Fala: `speak` e os XCMDs de fala (Vocalise, say) usando o speech-dispatcher do Linux
+- [ ] QuickTime: QTPict e os XCMDs de filme
 - [ ] Fontes bitmap do Mac guardadas na pilha (recursos FONT/NFNT), para o texto quebrar a linha no mesmo lugar que no Mac
 - [ ] Mais XCMDs/XFCNs reescritos, conforme as pilhas que a comunidade testar
 
@@ -44,6 +48,7 @@ dependem das outras mensagens do sistema.
 - [ ] `create stack` e `save stack as`
 - [ ] `print field`, `print` de uma expressão e `open report printing` (relatórios com modelo)
 - [ ] Editor de scripts (hoje os scripts só podem ser lidos, no inspetor)
+- [ ] Uma pilha Home mínima, para pilhas que pedem à Home o nome do usuário ou as pastas (`gethomeinfo`, `card field "User Name"`)
 
 ## Mais para a frente
 

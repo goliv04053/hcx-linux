@@ -150,7 +150,8 @@ class Script:
         buf = ""
         for ln in raw:
             ln = strip_comment(ln).rstrip()
-            if ln.endswith("¬"):
+            # ¬ is byte 0xC2, which a Japanese (Shift-JIS) stack shows as ﾂ
+            if ln.endswith(("¬", "\uff82")):
                 buf += ln[:-1] + " "
                 continue
             lines.append((buf + ln).strip())
@@ -227,13 +228,16 @@ class Script:
         k = self._find_then(toks)
         n = len(lines)
         if k < 0:
-            # `then` on the following line
-            if i + 1 < n:
-                nt = tokenize(lines[i + 1])
+            # `then` on the following line (blank lines in between are allowed)
+            j = i + 1
+            while j < n and not lines[j]:
+                j += 1
+            if j < n:
+                nt = tokenize(lines[j])
                 if nt and nt[0].low == "then":
                     toks = toks + nt
                     k = len(toks) - len(nt)
-                    i += 1
+                    i = j
             if k < 0:
                 return Stmt("if", toks[1:], [], []), i + 1
         cond = toks[1:k]
@@ -256,12 +260,15 @@ class Script:
     def _if_virtual(self, toks, lines, i):
         # an `if` that starts in the middle of a line (after then/else)
         k = self._find_then(toks)
-        if k < 0 and i < len(lines):
-            nt = tokenize(lines[i])
+        j = i
+        while k < 0 and j < len(lines) and not lines[j]:
+            j += 1
+        if k < 0 and j < len(lines):
+            nt = tokenize(lines[j])
             if nt and nt[0].low == "then":
                 k = len(toks)
                 toks = toks + nt
-                i += 1
+                i = j + 1
         if k < 0:
             return Stmt("if", toks[1:], [], []), i
         cond = toks[1:k]
@@ -782,7 +789,11 @@ class Interp:
     # -- execution --------------------------------------------------------------------
     def tick(self):
         self.steps += 1
-        if self.steps > MAX_STEPS:
+        if not self.steps & 1023:
+            # let the window stay responsive; it raises _Exit("hypercard") if the user stopped the script
+            self.host.poll()
+        limit = getattr(self.host, "max_steps", MAX_STEPS)
+        if limit and self.steps > limit:
             raise HTError("Script ran too long")
 
     def run_block(self, block):
@@ -828,11 +839,13 @@ class Interp:
                 raise
             return True
 
+        # without a window to stop it from, a runaway loop ends after a million turns
+        cap = 1_000_000 if getattr(self.host, "max_steps", MAX_STEPS) else None
         if not toks or low[0] == "forever":
             n = 0
             while loop_once():
                 n += 1
-                if n > 1_000_000:
+                if cap and n > cap:
                     break
             return
         if low[0] in ("until", "while"):
@@ -845,7 +858,7 @@ class Interp:
                 if not loop_once():
                     break
                 n += 1
-                if n > 1_000_000:
+                if cap and n > cap:
                     break
             return
         if low[0] == "with":
@@ -954,6 +967,9 @@ class Interp:
             return
         if isinstance(ref, Obj) and ref.t == "menu":
             self.host.menu_put(ref.a, value, prep)
+            return
+        if isinstance(ref, Obj) and ref.t == "menuitem":
+            self.host.menu_item_put(ref.a, ref.b, value, prep)
             return
         raise HTError("Can't put into that")
 
@@ -1373,6 +1389,15 @@ class Interp:
             if p.peek_low() in ("menumsg", "menumsgs", "menumessage", "menumessages"):
                 p.next()
             self.host.menu_put(ref.a, val, prep, p.expr())
+            return
+        if isinstance(ref, Obj) and ref.t == "menuitem":
+            msgs = None
+            if p.peek_low() == "with":
+                p.next()
+                if p.peek_low() in ("menumsg", "menumsgs", "menumessage", "menumessages"):
+                    p.next()
+                msgs = p.expr()
+            self.host.menu_item_put(ref.a, ref.b, val, prep, msgs)
             return
         self.put_into(ref, val, prep)
 
@@ -1831,12 +1856,17 @@ class Interp:
         # sort [lines|items of] container [ascending|descending] [text|numeric]
         p = Parser(self, toks, 1)
         kind = "line"
+        if p.peek_low() == "the" and p.peek_low(1) in ("cards", "cds", "marked"):
+            p.next()
         if p.peek_low() in ("lines", "items", "line", "item"):
             kind = "item" if p.next().low.startswith("item") else "line"
             if p.peek_low() == "of":
                 p.next()
-        elif p.peek_low() in ("cards", "this", "stack", "bkgnd", "background", "marked"):
-            return
+        elif p.peek_low() in ("cards", "cds", "this", "stack", "marked", "ascending", "descending", "text",
+                              "numeric", "international", "datetime", "by") or \
+                (p.peek_low() in ("card", "cd", "bkgnd", "background", "bg") and
+                 p.peek_low(1) not in ("field", "fld", "button", "btn")):
+            return self._sort_cards(p)
         ref = p.container(stop=("ascending", "descending", "text", "numeric", "international", "datetime", "by"))
         desc = False
         numeric = False
@@ -1873,6 +1903,77 @@ class Interp:
             order.sort(key=lambda k: keys[k].lower(), reverse=desc)
         parts = [parts[k] for k in order]
         self.put_into(ref, sep.join(parts) + (sep if trail else ""))
+
+    def _sort_cards(self, p):
+        """sort [marked] [cards] [of this stack | of bkgnd X] [ascending|descending] [type] by expr"""
+        h = self.host
+        st = h.stack
+        if st is None or not st.cards:
+            return
+        marked = False
+        bg = None
+        while not p.at_end() and p.peek_low() not in ("ascending", "descending", "text", "numeric",
+                                                     "international", "datetime", "by"):
+            w = p.peek_low()
+            if w == "marked":
+                p.next()
+                marked = True
+            elif w in ("cards", "cds", "card", "cd", "of", "in", "this", "stack"):
+                p.next()
+            elif w in ("bkgnd", "background", "bg"):
+                o = p.object_ref(stop=("ascending", "descending", "text", "numeric", "international",
+                                       "datetime", "by"))
+                if o is not None and o.t == "bg":
+                    bg = o.a
+            else:
+                p.next()   # a stack name: only the current stack can be sorted
+        desc = numeric = dt = False
+        by = None
+        while not p.at_end():
+            w = p.next().low
+            if w == "descending":
+                desc = True
+            elif w == "numeric":
+                numeric = True
+            elif w == "datetime":
+                dt = True
+            elif w == "by":
+                by = p.toks[p.i:]
+                break
+        if not by:
+            raise HTError("Expected “by” in sort")
+        cur = h.card
+        slots = [k for k, c in enumerate(st.cards)
+                 if (not marked or c.marked) and (bg is None or c.bg_id == bg.id)]
+        keys = {}
+        saved = h.index
+        try:
+            for k in slots:
+                h.index = k
+                try:
+                    keys[k] = str(self.eval_toks(by))
+                except HTError:
+                    keys[k] = ""
+        finally:
+            h.index = saved
+
+        def key(k):
+            v = keys[k]
+            if numeric:
+                return (1, to_num(v)) if is_number(v) else (0, 0)
+            if dt:
+                try:
+                    return (1, _parse_date(v))
+                except Exception:  # noqa: BLE001
+                    return (0, 0)
+            return v.lower()
+        order = sorted(slots, key=key, reverse=desc)
+        cards = list(st.cards)
+        for slot, src in zip(slots, order):
+            st.cards[slot] = cards[src]
+        if cur in st.cards:
+            h.index = st.cards.index(cur)
+        h.changed(None)
 
     def cmd_start(self, toks):
         p = Parser(self, toks, 1)
@@ -2021,6 +2122,12 @@ _BIN_PREC = [
 ]
 
 
+_TYPE_WORDS = ("number", "integer", "logical", "point", "rect", "rectangle", "date", "empty")
+# plural object words can't name a single object, so `put x into stacks` is a variable
+_PLURAL_OBJ_WORDS = ("cards", "cds", "backgrounds", "bkgnds", "bgs", "buttons", "btns", "fields", "flds",
+                     "stacks", "parts")
+
+
 class Parser:
     def __init__(self, interp, toks, start=0):
         self.it = interp
@@ -2074,6 +2181,9 @@ class Parser:
                          "is an", "is a", "is not"):
                 parts = cand.split()
                 if [w, n1, n2][:len(parts)] == parts and cand in ops:
+                    # "if x is a then": `a` is a variable unless a type name follows
+                    if parts[-1] in ("a", "an") and self.peek_low(len(parts)) not in _TYPE_WORDS:
+                        continue
                     return cand, len(parts)
             if "is" in ops:
                 return "is", 1
@@ -2240,7 +2350,8 @@ class Parser:
         if low == "number" and self.peek_low() == "of":
             self.next()
             return self.number_of()
-        if low in OBJ_WORDS or low in ("me", "this", "menu", "menuitem", "window", "target") or \
+        if (low in OBJ_WORDS and (low not in _PLURAL_OBJ_WORDS or it.get_var(low) is None)) or \
+                low in ("me", "this", "menu", "menuitem", "window", "target") or \
                 (low in ("next", "prev", "previous") and self.peek_low() in OBJ_WORDS):
             self.i -= 1
             o = self.object_ref()
@@ -2343,6 +2454,10 @@ class Parser:
                 break
             if t.low in CHUNKS or (t.low in ORDINALS and self.peek_low(1) in tuple(CHUNKS) + tuple(OBJ_WORDS)):
                 if not words:
+                    if t.low in ORDINALS and self.peek_low(1) in OBJ_WORDS:
+                        # "the last card field", "the first card"
+                        o = self.object_ref()
+                        return it.value_of(o) if o is not None else ""
                     ref = self.chunk_ref()
                     return it.value_of(ref)
                 break
@@ -2476,7 +2591,7 @@ class Parser:
             x, y = h.mouse_loc() if "mouse" in n else h.click_loc()
             return {"mouseh": str(x), "mousev": str(y), "clickh": str(x), "clickv": str(y)}.get(n, "%d,%d" % (x, y))
         if n in ("mouseclick",):
-            return FALSE
+            return b(h.mouse_clicked())
         if n in ("commandkey", "cmdkey", "optionkey", "shiftkey", "controlkey", "capslockkey"):
             return "up"
         if n in ("sound",):
@@ -2677,8 +2792,10 @@ class Parser:
         if w == "selection" or (w == "the" and self.peek_low(1) == "selection"):
             self.i += 1 if w == "selection" else 2
             return SelRef()
-        if w in OBJ_WORDS or w in ("me", "target") or (w in ORDINALS and self.peek_low(1) in OBJ_WORDS) or \
-                (w == "the" and self.peek_low(1) == "target"):
+        if (w in OBJ_WORDS and w not in _PLURAL_OBJ_WORDS) or w in ("me", "target") or \
+                (w in ORDINALS and self.peek_low(1) in OBJ_WORDS) or \
+                (w == "the" and self.peek_low(1) == "target") or \
+                (w == "the" and self.peek_low(1) in ORDINALS and self.peek_low(2) in OBJ_WORDS):
             o = self.object_ref()
             if o is None:
                 raise HTError("No such object")
@@ -2699,6 +2816,12 @@ class Parser:
         if nt is not None and nt.kind == "op" and nt.val == "(":
             self.i += 1
             return _Literal(self.call_function(t.val, self.paren_args()))
+        # "item 2 of loc of me": a property written without "the"
+        if self.peek_low() == "of" and self.it.get_var(t.low) is None and \
+                (t.low in PROP_WORDS or t.low in _FUNCS_OF or
+                 t.low in ("short", "long", "abbr", "abbrev", "abbreviated")):
+            self.i -= 1
+            return _Literal(self.factor())
         if t.low in CONSTANTS and self.it.get_var(t.low) is None:
             return _Literal(CONSTANTS[t.low])
         return VarRef(t.low)
@@ -2708,7 +2831,8 @@ class Parser:
         self.stop = tuple(stop)
         if w in CHUNKS or (w in ORDINALS and self.peek_low(1) in CHUNKS):
             return self.chunk_ref()
-        if w == "the" and (self.peek_low(1) in CHUNKS or self.peek_low(1) in ORDINALS):
+        if w == "the" and (self.peek_low(1) in CHUNKS or
+                           (self.peek_low(1) in ORDINALS and self.peek_low(2) in CHUNKS)):
             self.next()
             return self.chunk_ref()
         if w in ("menu", "menuitem"):
@@ -3023,9 +3147,10 @@ def _pick(items, spec):
 def _eq(a, c):
     if is_number(a) and is_number(c):
         return to_num(a) == to_num(c)
-    return str(a).strip().lower() == str(c).strip().lower() if (str(a).strip() == str(a) or
-                                                                 str(c).strip() == str(c)) else \
-        str(a).lower() == str(c).lower()
+    # surrounding spaces don't count, but a return is a real character:
+    # `repeat until char n of it is not return` must stop at the end of the text
+    a, c = str(a).lower(), str(c).lower()
+    return a == c or a.strip(" \t") == c.strip(" \t")
 
 
 def _is_type(v, typ):
@@ -3189,6 +3314,29 @@ _BUILTIN = {
     "upper": lambda it, a: a[0].upper() if a else "",
     "lower": lambda it, a: a[0].lower() if a else "",
 }
+
+
+
+def _math_safe(f, name):
+    # HyperCard answers INF or NAN instead of stopping the script: sqrt(-1), ln(0), cos(1e400)
+    def g(it, a):
+        try:
+            return f(it, a)
+        except ZeroDivisionError:
+            return "INF"
+        except OverflowError:
+            return "INF"
+        except ValueError:
+            if name in ("ln", "log2", "ln1") and a and to_num(a[0]) == (0 if name != "ln1" else -1):
+                return "-INF"
+            return "NAN"
+    return g
+
+
+for _k in ("sqrt", "sin", "cos", "tan", "atan", "exp", "exp1", "exp2", "ln", "ln1", "log2",
+           "annuity", "compound"):
+    if _k in _BUILTIN:
+        _BUILTIN[_k] = _math_safe(_BUILTIN[_k], _k)
 
 _FUNCS_OF = {k: v for k, v in _BUILTIN.items() if k in (
     "length", "abs", "round", "trunc", "random", "sqrt", "sin", "cos", "tan", "atan", "exp", "ln",

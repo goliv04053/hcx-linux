@@ -77,7 +77,7 @@ A versão 3 tem um **interpretador HyperTalk completo**, escrito do zero em Pyth
 Os **XCMDs/XFCNs** são código de máquina 68k do Mac e não rodam no Linux. Os mais usados foram reescritos em Python com o mesmo nome e os mesmos parâmetros, então os scripts chamam eles normalmente:
 
 - **Textos e recursos:** GetStr, Get1Str, SetStr, ResID, listOfResources (e os recursos CSTR, STR, TEXT e twtx da pilha)
-- **Menus e listas:** PopItUp (menu suspenso no lugar do clique, com submenus), ListSelect, StripEm, CharInStr
+- **Menus e listas:** PopItUp e HPopUpMenu (menu suspenso no lugar do clique, com submenus), ListSelect, StripEm, CharInStr
 - **Janelas:** Picture (paletas e imagens PICT), TextXWindow (janelas de texto/ajuda), Movie (vídeo pelo GTK)
 - **Arquivos:** GetFilesInDir, GetFileSize, GetPathInfo, DeleteFile, CreateFolder, AppendDataToFile, AppendStyleDataToFile, GetFileIndexedEntry
 - **Texto e área de transferência:** SelectionToClip, AppendToClip, ChangeFontSizes, RemoveAttribute, RemoveUB, GetCharWidth, GetClickedWord, FontExists

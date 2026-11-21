@@ -31,6 +31,9 @@ class CardView(Gtk.Fixed):
         self.bg_only = False
         self.selected = None          # (kind, part id)
         self.pressed = {}             # key -> temporary hilite
+        self.busy = lambda: False     # the window says when a script is running
+        self.pending_click = False    # for `the mouseClick`
+        self.script_click = (0, 0)
         self.scroll = {}              # key -> scroll offset in px
         self.editing = None           # (kind, pid, textview)
         self._node = None
@@ -312,6 +315,12 @@ class CardView(Gtk.Fixed):
     # -- browse tool ------------------------------------------------------------
     def _on_pressed(self, gesture, n_press, x, y):
         self.mouse_down = True
+        if self.busy():
+            # a script is running: it may poll the mouse, but the click starts nothing
+            if self.card:
+                cx, cy = self.to_card(x, y)
+                self.script_click = (int(cx), int(cy))
+            return
         self.grab_focus()
         if not self.card:
             return
@@ -357,6 +366,9 @@ class CardView(Gtk.Fixed):
 
     def _on_released(self, gesture, n_press, x, y):
         self.mouse_down = False
+        self.pending_click = True
+        if self.busy():
+            return
         if self.tool != "browse" or not getattr(self, "_press", None):
             return
         key, p, layer = self._press

@@ -216,6 +216,40 @@ def pop_it_up(it, a):
     return "%d,%d" % (line, sub)
 
 
+@xfcn("HPopUpMenu", "FullHPop")
+def h_pop_up_menu(it, a):
+    """HPopUpMenu(items, checkedItem, top, left) pops up a menu with the given
+    items (lines, or one line of comma-separated items) with its top-left
+    corner at left,top and returns "item text,,item number", or empty if
+    nothing was chosen. A menu resource id as items isn't supported."""
+    src = str(_arg(a, 0))
+    if ht.is_number(src):
+        return ""
+    lines = [x for x in src.split("\n")]
+    if len(lines) == 1 and "," in lines[0]:
+        lines = lines[0].split(",")
+    while lines and lines[-1] == "":
+        lines.pop()
+    checked = int(ht.to_num(_arg(a, 1, "0"))) if ht.is_number(_arg(a, 1, "0")) else 0
+    try:
+        v = int(ht.to_num(_arg(a, 2, "0") or 0))
+        h = int(ht.to_num(_arg(a, 3, "0") or 0))
+    except ht.HTError:
+        h = v = 0
+    items = []
+    for k, ln in enumerate(lines):
+        enabled = not ln.startswith("(")
+        if ln.startswith("("):
+            ln = ln[1:]
+        items.append({"text": ln, "sub": [], "enabled": enabled, "sep": ln.startswith("-"),
+                      "checked": k + 1 == checked, "title": False})
+    r = it.host.popup_menu(items, h, v)
+    if not r:
+        return ""
+    line = r[0]
+    return "%s,,%d" % (items[line - 1]["text"] if 0 < line <= len(items) else "", line)
+
+
 @xfcn("ListSelect", "SelectList")
 def list_select(it, a):
     """ListSelect(width, "h,v", prompt, list) → the chosen lines (several

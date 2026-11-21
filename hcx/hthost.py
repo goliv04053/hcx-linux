@@ -646,6 +646,13 @@ class HostMixin:
     def click_loc(self):
         return self._click
 
+    def poll(self):
+        """Called every so often while a script runs."""
+
+    def mouse_clicked(self):
+        """`the mouseClick`: has the user clicked since the script started (or since the last check)?"""
+        return False
+
     def mouse_is_down(self):
         return bool(getattr(self, "_mouse_down", False) or getattr(getattr(self, "view", None), "mouse_down", False))
 
@@ -766,6 +773,39 @@ class HostMixin:
             m[1] = m[1] + new
         self.menus_changed()
 
+    def menu_item_put(self, menu, item, value, prep="into", msgs=None):
+        """put … into/before/after menuItem x of menu y"""
+        m = self._menu(menu)
+        if m is None:
+            return
+        i = self._item_index(m, item)
+        if i is None:
+            if prep == "into":
+                return
+            i = len(m[1]) if prep == "after" else 0
+        items = [x for x in str(value).split("\n")]
+        if len(items) == 1 and "," in items[0]:
+            items = items[0].split(",")
+        mlist = str(msgs).split("\n") if msgs is not None else []
+        new = []
+        for k, text in enumerate(items):
+            text = text.strip()
+            msg = mlist[k].strip() if k < len(mlist) else ""
+            new.append([text.lstrip("("), msg, not text.startswith(("(", "-")), False, ""])
+        if prep == "into":
+            old = m[1][i]
+            if len(new) == 1:
+                old[0], old[2] = new[0][0], new[0][2]
+                if msgs is not None:
+                    old[1] = new[0][1]
+            else:
+                m[1][i:i + 1] = new
+        elif prep == "before":
+            m[1][i:i] = new
+        else:
+            m[1][i + 1:i + 1] = new
+        self.menus_changed()
+
     def menu_delete_item(self, menu, item):
         m = self._menu(menu)
         if m is None:
@@ -780,8 +820,8 @@ class HostMixin:
         if ht.is_number(v):
             i = int(ht.to_num(v)) - 1
             return i if 0 <= i < len(m[1]) else None
-        low = v.lower()
-        return next((k for k, x in enumerate(m[1]) if x[0].lower() == low), None)
+        low = v.lower().replace("...", "…")
+        return next((k for k, x in enumerate(m[1]) if x[0].lower().replace("...", "…") == low), None)
 
     def menu_item_prop(self, menu, item, prop):
         m = self._menu(menu)
