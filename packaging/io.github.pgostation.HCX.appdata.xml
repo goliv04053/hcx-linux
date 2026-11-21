@@ -23,7 +23,23 @@
       <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/chapter-menu.png</image>
       <caption>A menu made by the stack's own HyperTalk scripts</caption>
     </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/goliv04053/hcx-linux/main/docs/screenshots/colors.png</image>
+      <caption>A stack colored with AddColor</caption>
+    </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.pgostation.HCX.desktop</launchable>
   <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="3.1" date="2026-11-21">
+      <description>
+        <p>AddColor colors, MACE and IMA compressed sounds, and many HyperTalk fixes found by testing 178 stacks. Scripts no longer freeze the window; Esc stops one.</p>
+      </description>
+    </release>
+    <release version="3.0" date="2026-11-21">
+      <description>
+        <p>First release for Linux, with a HyperTalk interpreter and native versions of common XCMDs.</p>
+      </description>
+    </release>
+  </releases>
 </component>
