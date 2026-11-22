@@ -31,6 +31,11 @@
   <launchable type="desktop-id">io.github.pgostation.HCX.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.3.1" date="2026-11-22">
+      <description>
+        <p>Opens DiskDoubler archives and disk images that come inside an archive, such as the Voyager Expanded Books.</p>
+      </description>
+    </release>
     <release version="3.3" date="2026-11-22">
       <description>
         <p>Opens Compact Pro archives and more StuffIt methods, shows the dialogs of dialog externals (ShowDialog, Dialoger, ShowList and the file dialogs), speaks with speech-dispatcher or eSpeak NG, and can use the Mac fonts and Home stack from a Mac disk of your own.</p>
