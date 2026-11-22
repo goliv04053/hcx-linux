@@ -236,6 +236,112 @@ def screen_rects(it, a):
     return it.host.screen_rect()
 
 
+_EXT_OVERRIDE = {}
+
+
+def _ext_code(it, name):
+    """The 68k code of the stack's own XCMD or XFCN of that name, or b"".
+    Natives use it only to tell versions of an external apart by the
+    usage or copyright text inside (never to run it)."""
+    low = name.lower()
+    if low in _EXT_OVERRIDE:        # set by tools/xemu/compare.py
+        return _EXT_OVERRIDE[low]
+    try:
+        chain = it.host.resource_chain()
+    except Exception:  # noqa: BLE001
+        return b""
+    for res in chain:
+        for r in res:
+            if r[0] in ("XFCN", "XCMD") and r[2].lower() == low:
+                return r[3]
+    return b""
+
+
+def _bool_param(v):
+    v = str(v).strip().lower()
+    return True if v == "true" else False if v == "false" else None
+
+
+def _fold(text):
+    """Case folding like the Mac's Script Manager for Mac Roman text."""
+    return text.lower()
+
+
+@xfcn("FullReplace")
+def full_replace(it, a):
+    """FullReplace(input, search[, replace[, all[, case sensitive][, offset]]])
+    by Frédéric Rinaldi. Versions before 1.2 have no case parameter; a fifth
+    parameter that is a number is the offset of those versions."""
+    if len(a) < 2:
+        return "Error : Missing parameter(s)"
+    text, pat = str(a[0]), str(a[1])
+    rep = str(_arg(a, 2))
+    every, case, offset = True, True, 1
+    if len(a) > 3 and str(a[3]) != "":
+        every = _bool_param(a[3])
+        if every is None:
+            return "Error : Param #4 must be boolean"
+    rest = list(a[4:6])
+    code = _ext_code(it, "FullReplace")
+    old = bool(code) and b"<case sens.>" not in code
+    if old and len(a) > 4:
+        if not ht.is_number(a[4]) or int(ht.to_num(a[4])) < 1:
+            return "Error : Param #5 must be > 0"
+        rest = [a[4]]
+    elif code and not old and len(a) > 4 and _bool_param(a[4]) is None:
+        return "Error : Param #5 must be boolean"
+    if rest and _bool_param(rest[0]) is not None:
+        case = _bool_param(rest.pop(0))
+        n_off = 6
+    else:
+        n_off = 5
+    if rest and str(rest[0]) != "":
+        if not ht.is_number(rest[0]):
+            return "Error : Param #%d must be boolean" % n_off if n_off == 5 and len(a) > 5 else \
+                "Error : Param #%d must be > 0" % n_off
+        offset = int(ht.to_num(rest[0]))
+        if offset < 1:
+            return "Error : Param #%d must be > 0" % n_off
+    if not text or not pat:
+        return ""
+    hay = text if case else _fold(text)
+    needle = pat if case else _fold(pat)
+    out, i = [], offset - 1
+    out.append(text[:i])
+    while True:
+        j = hay.find(needle, i)
+        if j < 0:
+            break
+        out.append(text[i:j] + rep)
+        i = j + len(pat)
+        if not every:
+            break
+    out.append(text[i:])
+    return "".join(out)
+
+
+@xfcn("ReplaceCharSet")
+def replace_char_set(it, a):
+    """ReplaceCharSet(text, original set, substitution set) by Rinaldi."""
+    text, src, dst = (str(_arg(a, i)) for i in range(3))
+    if not text or not src or not dst:
+        return "Error : Missing or empty parameter"
+    if len(src) != len(dst):
+        return "Error : Sets have different length"
+    table = {}
+    first_wins = b"ReplaceCharSet 1.0," in _ext_code(it, "ReplaceCharSet")
+    for x, y in zip(src, dst):
+        if not (first_wins and x in table):
+            table[x] = y
+    return "".join(table.get(ch, ch) for ch in text)
+
+
+@xfcn("LeafName")
+def leaf_name(it, a):
+    """LeafName(path): what follows the last colon (Dartmouth XCMDs)."""
+    return str(_arg(a, 0)).rsplit(":", 1)[-1]
+
+
 # -- dialogs and menus ---------------------------------------------------------------------
 
 def _menu_lines(text):

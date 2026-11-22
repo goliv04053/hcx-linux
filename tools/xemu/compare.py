@@ -144,7 +144,11 @@ def compare(h, name, kind, code, params, files=None):
     emu_log = list(h.lines)
     h.lines.clear()
     snap = sandbox(files or {})
-    nat = native(it, name, kind, params)
+    xcmds._EXT_OVERRIDE[name.lower()] = code
+    try:
+        nat = native(it, name, kind, params)
+    finally:
+        xcmds._EXT_OVERRIDE.clear()
     nat_files = snap()
     same = emu.get("error") is None and nat.get("error") is None and \
         (emu.get("result") or "") == (nat.get("result") or "") and emu_files == nat_files
