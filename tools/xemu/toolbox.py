@@ -59,6 +59,23 @@ class Toolbox:
         self.t0 = time.monotonic()
         self.log = it.host.log if it is not None else (lambda *_a: None)
         self._screen()
+        self._drive_queue()
+
+    def _drive_queue(self):
+        """One hard disk in the drive queue (DrvQHdr): drive 1, the drive
+        every volume of the File Manager is on. The 4 bytes before an
+        element are its flags: not locked, a disk that can't be ejected."""
+        m = self.m
+        p = self.heap.deref(self.heap.new_handle(4 + 16, clear=True))
+        m.wbytes(p, bytes([0, 8, 0, 0]))
+        q = p + 4
+        m.w16(q + 4, 0)                     # qType
+        m.w16(q + 6, 1)                     # dQDrive
+        m.w16(q + 8, -33 & 0xFFFF)          # dQRefNum: the SCSI disk driver
+        m.w16(q + 10, 0)                    # dQFSID: HFS
+        m.w16(0x308, 0)
+        m.w32(0x30A, q)                     # qHead
+        m.w32(0x30E, q)                     # qTail
 
     def _screen(self):
         """The main screen: QuickDraw's screenBits and a GDevice, sized
@@ -77,17 +94,18 @@ class Toolbox:
         m.w16(p + 4, 0x8000 | ((r - l) & 0x3FFF))
         for i, v in enumerate((t, l, b, r)):
             m.w16(p + 6 + 2 * i, v)         # bounds
-        m.w16(p + 32, 8)                    # pixelSize
-        m.w16(p + 30, 0)                    # pixelType
-        m.w16(p + 34, 1)                    # cmpCount
-        m.w16(p + 36, 8)                    # cmpSize
+        m.w16(p + 32, 16)                   # pixelSize: thousands of colours, the depth
+        m.w16(p + 30, 16)                   # pixelType: RGBDirect   HCX's GetDepth gives
+        m.w16(p + 34, 3)                    # cmpCount
+        m.w16(p + 36, 5)                    # cmpSize
         gd = self.heap.new_handle(62, clear=True)
         g = self.heap.deref(gd)
-        m.w16(g + 4, 0)                     # gdType: clut
+        m.w16(g + 4, 2)                     # gdType: directType
+        m.w32(g + 42, 132)                  # gdMode (a long): the 16-bit mode
         m.w32(g + 22, pm)                   # gdPMap
         for i, v in enumerate((t, l, b, r)):
             m.w16(g + 34 + 2 * i, v)        # gdRect
-        m.w16(g + 20, 0x3C00 | 0x8000)      # gdFlags: main screen, active, screen device
+        m.w16(g + 20, 0x3C00 | 0x8000 | 1)  # gdFlags: main screen, active, screen device, colour
         m.w32(g + 30, 0)                    # gdNextGD
         self.gdevice = gd
         m.w32(0x8A4, gd)                    # MainDevice
@@ -693,6 +711,23 @@ def _bit_shift(tb, op):
     count = m.pops16()
     v = m.pop32()
     tb.ret32((v << count) if count >= 0 else (v >> -count))
+
+
+@tb_trap(0xAAA2)
+def _palette_dispatch(tb, op):
+    """HasDepth(gd, depth, whichFlags, flags): the screen takes every depth
+    from 1 to 32 bits, colour or grey; the answer is the mode's number."""
+    m = tb.m
+    sel = m.d(0) & 0xFFFF
+    if sel & 0xFF == 0x14:     # HasDepth (0x0A14; early glue passes 0x0014)
+        m.pop16()
+        m.pop16()
+        depth = m.pop16()
+        m.pop32()
+        modes = {1: 128, 2: 129, 4: 130, 8: 131, 16: 132, 32: 133}
+        tb.ret16(modes.get(depth, 0))
+    else:
+        raise Unimplemented("PaletteDispatch selector %04X" % sel)
 
 
 _GESTALT = {

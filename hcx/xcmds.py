@@ -1113,8 +1113,10 @@ def _mac_resolve(path):
     """("", local path) for a Mac path, or (error, None) with the error the
     File Manager would give: "nsv" (no such volume), "dirnf" (a folder on
     the way is missing) or "bdnam". Names match in any case, "::" goes up a
-    folder and a colon at the end is ignored. A name with no volume is
-    looked for where HCX keeps such files (see hthost.mac_to_local)."""
+    folder and a colon at the end is ignored. A path that starts with a
+    colon starts from the default folder, the top of the first volume, as
+    in tools/xemu. A name with no volume is looked for where HCX keeps such
+    files (see hthost.mac_to_local)."""
     import re
     from .hthost import files_root
     root = files_root()
@@ -1125,8 +1127,15 @@ def _mac_resolve(path):
         if not vol or not os.path.isdir(base):
             return "nsv", None
         parts = rest.split(":")
+    elif path.startswith(":"):     # from the default folder: the top of the first volume
+        vols = sorted((n for n in os.listdir(root) if os.path.isdir(os.path.join(root, n))
+                       and not n.startswith(".")), key=lambda n: (n.lower() != "hd", n.lower())) \
+            if os.path.isdir(root) else []
+        if not vols:
+            return "nsv", None
+        base, parts = os.path.join(root, vols[0]), path[1:].split(":")
     else:
-        base, parts = root, (path[1:] if path.startswith(":") else path).split(":")
+        base, parts = root, path.split(":")
     if len(parts) > 1 and parts[-1] == "":
         parts.pop()
     top, cur = base, base
@@ -1228,6 +1237,62 @@ def get_finfo(it, a):
     if ver >= (1, 5):
         out.append(str((size + 511) // 512 * 512))
     return ",".join(out)
+
+
+@xfcn("GetVInfo")
+def get_vinfo(it, a):
+    """Frederic Rinaldi's GetVInfo 1.0, 1.2 and 1.6 for a folder at the
+    top of HCX's folder for Mac files (a volume): "size,free,files,folders,
+    locked,ejectable,creation date and time,modification date and time".
+    Sizes are counted like an HFS volume of at most 65535 blocks of 32K,
+    in K for 1.0 and 1.6 and in bytes for 1.2."""
+    import shutil
+    from .hthost import files_root
+    code = _ext_code(it, "GetVInfo")
+    ver = _rinaldi_version(code, "GetVInfo")
+    a = [str(x) for x in a]
+    first = a[0] if a else ""
+    if len(a) == 1 and first in ("!", "?", "="):
+        return {
+            "!": "GetVInfo 1.0, © Frederic RINALDI 1992" if ver < (1, 1) else
+                 "GetVInfo %d.%d, © Frederic RINALDI 1992…1998" % ver if ver < (1, 6) else
+                 "68K_GetVInfo %d.%d, © Frederic RINALDI 1992…1999" % ver,
+            "?": "GetVInfo(<volume name or volume alias pathname>)",
+            "=": "<size,free,files nb,folders nb,locked,ejectable,Cre date,Cre time,Mod date,Mod time[,Bak date,Bak time]>"
+                 if ver < (1, 1) else
+                 "<size,free,files nb,folders nb,locked,ejectable,creation date,creation time,modification date,"
+                 "modification time,backup date,backup time>" if ver < (1, 6) else
+                 "<total size,free size,files nb,folders nb,locked,ejectable,creation date,creation time,"
+                 "modification date,modification time,backup date,backup time>"}[first]
+    if not first:
+        return "Error : Missing or empty parameter"
+    if first == ":":
+        return "Error : Volume not found"
+    err, path = _mac_resolve(first if ":" in first else first + ":")
+    if not err and not os.path.lexists(path):
+        err = "fnf"
+    if err:
+        return "Error : " + _RINALDI_ERR[err]
+    if not os.path.isdir(path) and ver >= (1, 2):
+        return "Error : Not a folder"
+    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(files_root()))
+    vol = os.path.join(files_root(), rel.split(os.sep)[0])
+    try:
+        st = os.stat(vol)
+        du = shutil.disk_usage(vol)
+    except OSError:
+        return "Error : I/O Error"
+    blk = 32768
+    total, free = min(du.total // blk, 0xFFFF), min(du.free // blk, 0xFFFF)
+    unit = 1 if ver == (1, 2) else 1024
+    files = dirs = 0
+    for _d, ds, fs in os.walk(vol):
+        ds[:] = [n for n in ds if not n.startswith(".")]
+        dirs += len(ds)
+        files += sum(1 for n in fs if not n.startswith("."))
+    d, t = _mac_date(st.st_mtime, "date"), _mac_date(st.st_mtime, "time")
+    return ",".join([str(total * blk // unit), str(free * blk // unit), str(files), str(dirs),
+                     "false", "false", d, t, d, t])
 
 
 @xcmd("SetFInfo", "SetFileInfo")
@@ -1777,6 +1842,28 @@ def get_depth(it, a):
     """Screen color depth in bits. HCX draws in full color, but stacks of the time
     only know 1 to 16 bits ("thousands of colors") and some refuse larger values."""
     return "16"
+
+
+@xfcn("GetMode")
+def get_mode(it, a):
+    """Frederic Rinaldi's GetMode 1.3 and 1.4: "B|C,depth,screen,B|C,max
+    depth,width,height" for the screen, which is in colour at the depth
+    GetDepth gives (1.3, made before thousands of colours, says 32)."""
+    code = _ext_code(it, "GetMode")
+    v14 = b"GetMode 1.4" in code or not code
+    a = [str(x) for x in a]
+    if a == ["!"]:
+        return "GetMode 1.4, © Frederic RINALDI 1990…1993" if v14 else "Version 1.3, © Frederic RINALDI 1990"
+    if a == ["?"]:
+        return "GetMode ()"
+    if a == ["="] and v14:
+        return "<curr mode>,<curr depth>,<screen nb>,<max mode>,<max depth>,<screen width>,<screen height>"
+    try:
+        l, t, r, b = (int(v) for v in str(it.host.screen_rect()).split(","))
+    except Exception:  # noqa: BLE001
+        l, t, r, b = 0, 0, 640, 480
+    depth = get_depth(it, [])
+    return "C,%s,1,C,32,%d,%d" % (depth if v14 else "32", r - l, b - t)
 
 
 @xcmd("SetDepth", "HideDesktop", "ShowDesktop", "MaxMem", "Compact", "PurgeMem", "FlushMem")

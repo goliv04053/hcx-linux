@@ -590,6 +590,16 @@ def _get_cat_info(tb, pb):
     fm.done(pb, _file_info(fm, m, pb, path, True))
 
 
+def _count_tree(path):
+    """(files, folders) inside a folder and all its folders."""
+    files = dirs = 0
+    for d, ds, fs in os.walk(path):
+        ds[:] = [n for n in ds if _visible(n)]
+        dirs += len(ds)
+        files += sum(1 for n in fs if _visible(n))
+    return files, dirs
+
+
 def _vol_info(tb, op):
     fm, m = _fm(tb), tb.m
     pb = m.a(0)
@@ -618,7 +628,7 @@ def _vol_info(tb, op):
         return fm.done(pb, ioErr)
     blk = 32768
     nfiles = sum(1 for n in _listing(path) if os.path.isfile(os.path.join(path, n)))
-    ndirs = sum(1 for n in _listing(path) if os.path.isdir(os.path.join(path, n)))
+    vfiles, vdirs = _count_tree(path)
     m.w16(pb + 22, vref & 0xFFFF)
     m.w32(pb + 30, _mac_time(st.st_mtime))      # ioVCrDate
     m.w32(pb + 34, _mac_time(st.st_mtime))      # ioVLsMod
@@ -640,8 +650,8 @@ def _vol_info(tb, op):
         m.w32(pb + 72, 0)
         m.w16(pb + 76, 0)
         m.w32(pb + 78, 0)
-        m.w32(pb + 82, nfiles)                  # ioVFilCnt
-        m.w32(pb + 86, ndirs)                   # ioVDirCnt
+        m.w32(pb + 82, vfiles)                  # ioVFilCnt: files on the volume
+        m.w32(pb + 86, vdirs)                   # ioVDirCnt: folders on the volume
         m.wbytes(pb + 90, b"\0" * 32)
     fm.done(pb, noErr)
 
