@@ -306,20 +306,27 @@ def find_hfs_volumes(img):
     # DiskCopy 4.2: 84-byte header, magic 0x0100 at 82
     if len(img) > 84 + 1536 and u16(img, 82) == 0x0100 and img[84 + 1024:84 + 1026] == b"BD":
         bases.append(84)
-    # Apple partition map
+    # Apple partition map. CD-ROMs often say 2048-byte blocks in block 0 but
+    # keep a map of 512-byte entries counted in 512-byte blocks: try both.
     if img[0:2] == b"ER" or img[512:514] == b"PM":
-        blk = u16(img, 2) if img[0:2] == b"ER" else 512
-        if blk not in (512, 1024, 2048):
-            blk = 512
-        count = u32(img, blk + 4) if img[blk:blk + 2] == b"PM" else 0
-        for i in range(min(count, 64)):
-            e = blk * (i + 1)
-            if img[e:e + 2] != b"PM":
+        sizes = []
+        if img[0:2] == b"ER" and u16(img, 2) in (1024, 2048):
+            sizes.append(u16(img, 2))
+        sizes.append(512)
+        for blk in sizes:
+            if img[blk:blk + 2] != b"PM":
+                continue
+            count = u32(img, blk + 4)
+            for i in range(min(count, 64)):
+                e = blk * (i + 1)
+                if img[e:e + 2] != b"PM":
+                    break
+                start = u32(img, e + 8) * blk
+                ptype = img[e + 48:e + 80].split(b"\0")[0]
+                if ptype == b"Apple_HFS" and img[start + 1024:start + 1026] == b"BD":
+                    bases.append(start)
+            if bases:
                 break
-            start = u32(img, e + 8) * blk
-            ptype = img[e + 48:e + 80].split(b"\0")[0]
-            if ptype == b"Apple_HFS" and img[start + 1024:start + 1026] == b"BD":
-                bases.append(start)
     vols = []
     for b in dict.fromkeys(bases):
         try:
