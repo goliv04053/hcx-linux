@@ -2031,6 +2031,10 @@ class Interp:
 
     def cmd_stop(self, toks):
         p = Parser(self, toks, 1)
+        if p.peek_low() in ("speech", "speaking"):
+            from . import speech
+            speech.get().stop()
+            return
         if p.peek_low() == "using":
             p.next()
             if p.peek_low() == "stack":
@@ -2154,7 +2158,24 @@ class Interp:
         return
 
     def cmd_speak(self, toks):
-        return
+        """speak text [with voice name | with name voice | with male|female|neutral|robotic [old|young] voice]"""
+        from . import speech
+        p = Parser(self, toks, 1)
+        text = p.expr(stop=("with",))
+        voice = None
+        if p.peek_low() == "with":
+            p.next()
+            if p.peek_low() == "voice":
+                p.next()
+                voice = p.expr()
+            elif p.peek_low() in ("male", "female", "neutral", "robotic", "old", "young", "child"):
+                words = []
+                while not p.at_end() and p.peek_low() != "voice":
+                    words.append(p.next().low)
+                voice = " ".join(words)
+            else:
+                voice = p.expr(stop=("voice",))
+        speech.get().speak(text, voice)
 
 
 # ---------------------------------------------------------------------------
@@ -2666,6 +2687,12 @@ class Parser:
             return "up"
         if n in ("sound",):
             return h.sound_state()
+        if n in ("speech",):
+            from . import speech
+            return speech.get().current()
+        if n in ("voices",):
+            from . import speech
+            return "\n".join(speech.MAC_VOICES) if speech.get().available() else ""
         if n in ("tool",):
             return "browse tool"
         if n in ("stacksinuse",):
@@ -3433,7 +3460,7 @@ _NOARG = {"date", "time", "seconds", "ticks", "secs", "version", "result", "targ
           "stacksinuse", "menus", "windows", "tool", "foundtext", "foundline", "foundchunk", "foundfield",
           "clicktext", "clickline", "clickchunk", "selectedtext", "selectedline", "selectedchunk",
           "commandkey", "cmdkey", "optionkey", "shiftkey", "systemversion", "diskspace", "heapspace",
-          "sound", "paramcount", "params", "platform"}
+          "sound", "paramcount", "params", "platform", "speech", "voices"}
 
 _THE_NOARG = _NOARG | {"short date", "long date", "abbr date", "abbrev date", "abbreviated date",
                        "short time", "long time", "long version", "short version", "short target",
@@ -3446,7 +3473,7 @@ _THE_NOARG_STRICT = {"date", "time", "seconds", "ticks", "secs", "version", "res
                      "screenrect", "stacksinuse", "menus", "windows", "tool", "sound", "paramcount",
                      "params", "commandkey", "optionkey", "shiftkey", "selection", "selectedtext",
                      "foundtext", "foundchunk", "foundline", "foundfield", "clicktext", "clickline",
-                     "clickchunk", "systemversion", "platform", "diskspace", "heapspace"}
+                     "clickchunk", "systemversion", "platform", "diskspace", "heapspace", "speech", "voices"}
 
 _SINGULAR_OBJ_WORDS = {"card", "cd", "bg", "bkgnd", "background", "button", "btn", "field", "fld", "part"}
 

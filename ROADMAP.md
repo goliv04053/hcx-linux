@@ -23,7 +23,7 @@ Pull requests and issues are welcome in English too.*
 
 - [x] Caixas de diálogo feitas com recursos DLOG/DITL (ShowDialog, DialogDisplay, Dialoger), ShowList, e a janela de arquivos para `answer file`, `ask file`, FileName, NewFileName e StandardFile
 - [x] Arquivos Compact Pro (.cpt) e autoextraíveis (.sea), e os métodos 5 (LZAH) e 8 (MW) do StuffIt. Testado com os 632 arquivos da seção HyperCard do arquivo de Mac da Universidade de Michigan: todos os que têm pilhas abrem (869 pilhas)
-- [ ] Fala: `speak` e os XCMDs de fala (Vocalise, say) usando o speech-dispatcher do Linux
+- [x] Fala: `speak`, `the speech`, `the voices` e os XCMDs de fala (Say, MacinTalkSay, Vocalise, SpeakText…) usando o speech-dispatcher do Linux ou o eSpeak NG
 - [ ] QuickTime: QTPict e os XCMDs de filme
 - [ ] Fontes bitmap do Mac guardadas na pilha (recursos FONT/NFNT), para o texto quebrar a linha no mesmo lugar que no Mac
 - [ ] Mais XCMDs/XFCNs reescritos, conforme as pilhas que a comunidade testar

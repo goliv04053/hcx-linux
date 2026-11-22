@@ -37,6 +37,8 @@ O AppImage usa o Python 3, o GTK 4 e a libadwaita que já vêm no sistema, por i
 sudo dnf install python3-gobject gtk4 libadwaita
 ```
 
+Para as pilhas que falam (comando `speak`), o HCX usa o speech-dispatcher, que o Fedora com GNOME já traz junto com o leitor de tela. Se ele não estiver instalado: `sudo dnf install speech-dispatcher python3-speechd espeak-ng`. Sem ele, as pilhas funcionam normalmente, só que em silêncio.
+
 Se o AppImage reclamar de FUSE (raro no Fedora), rode `./HCX-x86_64.AppImage --appimage-extract-and-run`.
 
 ## Idiomas
@@ -87,6 +89,7 @@ Os **XCMDs/XFCNs** são código de máquina 68k do Mac e não rodam no Linux. Os
 - **Cores:** AddColor (botões, campos, retângulos e figuras coloridas, inclusive as cores já guardadas na pilha), colorizeHC, GetDepth
 - **Arquivos:** GetFilesInDir, GetFileSize, GetPathInfo, DeleteFile, CreateFolder, AppendDataToFile, AppendStyleDataToFile, GetFileIndexedEntry
 - **Texto e área de transferência:** SelectionToClip, AppendToClip, ChangeFontSizes, RemoveAttribute, RemoveUB, GetCharWidth, GetClickedWord, FontExists
+- **Fala:** o comando `speak` do HyperCard (com `with voice` e `with female voice`), `the speech`, `the voices`, `stop speech`, e os XCMDs Say, MacinTalkSay, SpeakString, Talk, SetRate, SetPitch, Vocalise e SpeakText. A voz sai pelo speech-dispatcher do Linux (o mesmo do leitor de tela do GNOME) ou pelo eSpeak NG; as vozes do Mac (Agnes, Fred, Victoria…) viram uma voz parecida, masculina, feminina ou infantil
 - **Sistema:** MainScreenRect, GetScreenRects, PlayAIFFFile; MaxMem, SetDepth, HideDesktop e SetCustomIconBit não fazem nada (não precisam no Linux)
 
 Um XCMD que não está nessa lista é ignorado em silêncio, como se não tivesse feito nada.

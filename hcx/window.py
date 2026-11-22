@@ -1104,6 +1104,9 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
             self._script_dirty.pop(key, None)
 
     def _on_close_request(self, win):
+        from . import speech
+        if speech._SPEECH is not None:
+            speech._SPEECH.stop()
         self.view.finish_editing()
         self.save_script_changes()
         if not self.dirty:

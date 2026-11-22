@@ -991,3 +991,130 @@ def show_list(it, a):
     if spec["cancel"] == n:
         return name + "\n"
     return name + "\n" + ",".join(str(x) for x in values.get(nb + 2, []))
+
+
+# -- speech (MacinTalk and PlainTalk externals) --------------------------------------------
+
+def _speech():
+    from . import speech
+    return speech.get()
+
+
+@xcmd("Say", "MacinTalkSay", "Speak", "SpeakString", "Talk", "SayIt", "SpeakIt")
+def say(it, a):
+    """Say text — HyperMacinTalk, MacinTalkSay, SpeakString, Talk text[, rate, pitch]."""
+    if len(a) >= 3 and ht.is_number(a[1]):
+        _speech().set_rate_wpm(ht.to_num(a[1]))
+        if ht.is_number(a[2]):
+            _speech().set_pitch_hz(ht.to_num(a[2]))
+    _speech().speak(_arg(a, 0))
+
+
+@xcmd("SayPhonetic")
+def say_phonetic(it, a):
+    """MacinTalk phonetic text has no Linux equivalent: it is not spoken."""
+    return
+
+
+@xfcn("Phonemes", "Reader")
+def phonemes(it, a):
+    return str(_arg(a, 0))
+
+
+@xcmd("TurnSpeechOn", "TurnSpeechOff", "SpeechOn", "SpeechOff")
+def speech_on_off(it, a):
+    return
+
+
+@xcmd("SetRate", "SetSpeechRate")
+def set_rate(it, a):
+    if ht.is_number(_arg(a, 0)):
+        _speech().set_rate_wpm(ht.to_num(_arg(a, 0)))
+
+
+@xcmd("SetPitch", "SetSpeechPitch")
+def set_pitch(it, a):
+    if ht.is_number(_arg(a, 0)):
+        v = ht.to_num(_arg(a, 0))
+        _speech().set_pitch_hz(v if v > 0 else 110)
+
+
+@xcmd("StopSpeech", "StopSpeaking", "ShutUp")
+def stop_speech(it, a):
+    _speech().stop()
+
+
+@xcmd("Vocalise", "Vocalize")
+def vocalise(it, a):
+    """Vocalise "command", … by Alex Metcalf: quick speak, prepare to speak,
+    speak, stop speaking, speak faster/slower/higher/lower, are you speaking,
+    list available voices, check for voice, no more to speak."""
+    from . import speech
+    sp = _speech()
+    cmd = str(_arg(a, 0)).strip().lower().rstrip("?")
+    if cmd == "quick speak":
+        sp.speak(_arg(a, 1), "")
+    elif cmd == "prepare to speak":
+        v = str(_arg(a, 1))
+        sp.voice = "" if v.lower() in ("default", "") else v
+    elif cmd == "speak":
+        sp.speak(_arg(a, 1))
+    elif cmd in ("stop speaking", "no more to speak"):
+        sp.stop()
+    elif cmd == "speak faster":
+        sp.set_rate_wpm(sp.rate + 30)
+    elif cmd == "speak slower":
+        sp.set_rate_wpm(sp.rate - 30)
+    elif cmd == "speak higher":
+        sp.pitch = min(100, sp.pitch + 15)
+    elif cmd == "speak lower":
+        sp.pitch = max(-100, sp.pitch - 15)
+    elif cmd == "are you speaking":
+        return "yes" if sp.busy() else "no"
+    elif cmd == "list available voices":
+        return "\n".join(speech.MAC_VOICES) if sp.available() else ""
+    elif cmd == "check for voice":
+        return "" if sp.available() else "Speech isn't available."
+    return ""
+
+
+@xfcn("SpeakText")
+def speak_text(it, a):
+    """SpeakText(command, …) by Software Perspectives."""
+    from . import speech
+    sp = _speech()
+    cmd = str(_arg(a, 0)).strip().lower()
+    names = list(speech.MAC_VOICES)
+    if cmd == "checkforspeech":
+        return "true" if sp.available() else "false"
+    if cmd == "speakstring":
+        sp.speak(_arg(a, 1), "")
+    elif cmd == "speaktext":
+        v = _arg(a, 1)
+        voice = names[int(ht.to_num(v)) - 1] if ht.is_number(v) and 0 < int(ht.to_num(v)) <= len(names) else ""
+        sp.speak(_arg(a, 3), voice)
+    elif cmd in ("stopspeech", "stopspeechat"):
+        sp.stop()
+    elif cmd == "isspeaking":
+        return "true" if sp.busy() else "false"
+    elif cmd == "countvoices":
+        return str(len(names)) if sp.available() else "0"
+    elif cmd == "getvoicelist":
+        return "\n".join(names) if sp.available() else ""
+    elif cmd == "getvoiceinfo":
+        v = _arg(a, 1)
+        k = int(ht.to_num(v)) if ht.is_number(v) else 0
+        return names[k - 1] if 0 < k <= len(names) else ""
+    elif cmd == "setspeechrate":
+        if ht.is_number(_arg(a, 1)):
+            sp.set_rate_wpm(ht.to_num(_arg(a, 1)))
+    elif cmd == "getspeechrate":
+        return str(sp.rate)
+    elif cmd == "setspeechpitch":
+        if ht.is_number(_arg(a, 1)):
+            sp.pitch = max(-100, min(100, int((ht.to_num(_arg(a, 1)) - 45) * 3)))
+    elif cmd == "getspeechpitch":
+        return str(int(45 + sp.pitch / 3))
+    elif cmd == "getversion":
+        return "SpeakText 2.0 (HCX)"
+    return ""
