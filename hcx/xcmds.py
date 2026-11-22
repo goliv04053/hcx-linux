@@ -342,6 +342,109 @@ def leaf_name(it, a):
     return str(_arg(a, 0)).rsplit(":", 1)[-1]
 
 
+@xfcn("Substitute")
+def substitute(it, a):
+    """Substitute(characters, replacement, text) by Eric Celeste: each of
+    the characters in text becomes the first character of replacement
+    (or goes away when it's empty)."""
+    if len(a) != 3:
+        return ""
+    chars, rep, text = (str(x) for x in a)
+    rep = rep[:1]
+    return "".join(rep if ch in chars else ch for ch in text)
+
+
+def _align_number(s):
+    """Rinaldi's Align takes as a number anything made of digits, signs
+    and points that ends with a digit or a point (but not "." alone)."""
+    return bool(s) and s != "." and s[-1] in "0123456789." and all(c in "0123456789+-." for c in s)
+
+
+def _align_frac_width(s):
+    dot = s.rfind(".")
+    return 0 if dot < 0 or dot == len(s) - 1 else len(s) - dot
+
+
+@xfcn("Align")
+def align(it, a):
+    """Align(text[, F1[, ... Fn]][, "s=<separator>"][, "f=<filler>"]) by
+    Frédéric Rinaldi, with F = "width[,l|r|c|d[,separator]]": lines up the
+    items of each line in columns. The last format serves the remaining
+    columns; with none, each column is as wide as its widest item plus a
+    space. Text that doesn't fit ends in "…"; "d" lines up decimal points."""
+    a = [str(x) for x in a]
+    if not a or not a[0]:
+        return "Error : Missing parameter"
+    code = _ext_code(it, "Align")
+    sep = it.props.get("itemdelimiter", ",") if b"the itemDelimiter" in code else ","
+    fill = " "
+    fmts = []
+    buf1 = ""   # the original reads each parameter into one buffer, and
+    for p in a[1:]:   # tells options by its second byte even when stale
+        if len(p) >= 2:
+            buf1 = p[1]
+        if buf1 == "=":
+            if len(p) < 3:
+                return 'Error : Missing char following "%s"' % p
+            if p[0] in "sS":
+                sep = p[2]
+            elif p[0] in "fF":
+                fill = p[2]
+            else:
+                return 'Error : Param must be "s=…" or "f=…"'
+            continue
+        n = len(fmts) + 1
+        parts = p.split(",", 2)
+        if len(parts) == 2 and parts[1] == "":
+            parts = parts[:1]
+        w = parts[0][1:] if parts[0][:1] == "+" else parts[0]
+        if not w.isdigit() or int(w) < 1:
+            return "Error : First item of Format %d must be an integer > 0" % n
+        how = parts[1][:1].lower() if len(parts) > 1 else "l"
+        if how not in ("l", "r", "c", "d"):
+            return "Error : Second item of Format %d must be [l,r,c,d]" % n
+        after = parts[2] if len(parts) > 2 else ""
+        if "," in after:   # the separator stops after its first comma
+            after = after[:after.index(",") + 1]
+        fmts.append((int(w), how, after))
+    text = a[0].replace("\r", "\n")
+    if text.endswith("\n"):
+        text = text[:-1]
+    rows = [line.split(sep) for line in text.split("\n")]
+    ncol = max(len(r) for r in rows)
+    for r in rows:
+        r.extend([""] * (ncol - len(r)))
+    cols = []
+    for i in range(ncol):
+        if fmts:
+            cols.append(fmts[min(i, len(fmts) - 1)])
+        else:
+            cols.append((max(len(r[i]) for r in rows), "l", " "))
+    fracs = [max([_align_frac_width(r[i]) for r in rows if _align_number(r[i])] or [0])
+             if cols[i][1] == "d" else 0 for i in range(ncol)]
+
+    def cell(s, w, how, fw):
+        if how == "d" and _align_number(s):
+            dot = s.find(".")
+            whole, frac = (s, "") if dot < 0 else (s[:dot], s[dot:])
+            iw = w - fw
+            whole = "" if iw <= 0 else whole[-iw:].rjust(iw, fill)
+            out = whole + frac[:fw].ljust(fw, fill)
+            return out[-w:] if len(out) > w else out
+        if len(s) > w:
+            return s[:w - 1] + "…"
+        if how == "r":
+            return s.rjust(w, fill)
+        if how == "c":
+            left = (w - len(s)) // 2
+            return fill * left + s + fill * (w - len(s) - left)
+        return s.ljust(w, fill)
+
+    return "\n".join("".join(cell(r[i], w, how, fracs[i]) + after
+                             for i, (w, how, after) in enumerate(cols))
+                     for r in rows)
+
+
 # -- dialogs and menus ---------------------------------------------------------------------
 
 def _menu_lines(text):
