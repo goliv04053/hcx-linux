@@ -689,6 +689,80 @@ def full_sort(it, a):
     return out + trailing if not new else out
 
 
+@xfcn("Search")
+def search(it, a):
+    """Search(container, string, searchWhole[, every]) from Apple's 1990
+    sample externals: "line,item" of each place the string starts (case
+    and accents count), one per line, each line ending in a return. Item
+    numbers count the commas from the start of the text, not of the line.
+    With searchWhole only the starts of words (after a space or a return)
+    are tried; a fourth parameter, whatever its value, asks for every
+    place instead of the first."""
+    code = _ext_code(it, "Search")
+    dts = b"Container,theString" in code
+    v12 = b"Search XFCN 1.2" in code     # 1995: any case, and "line,item,char"
+    a = [str(x) for x in a]
+    usage12 = "Form: Search(<text>,<search string>,<search whole>[,<every occurrence>])"
+    if v12:     # 1.2 reports its errors in the global gXCMDError
+        it.globals["gxcmderror"] = usage12 if len(a) not in (3, 4) and a not in (["?"], ["!"]) else ""
+    if a == ["!"] and not dts:
+        return "Search XFCN 1.%d ©%d Apple Computer, Inc. All Rights Reserved." % ((2, 1995) if v12 else (1, 1990))
+    if v12 and a == ["?"]:
+        return usage12
+    if len(a) not in (3, 4):
+        return "" if v12 else \
+            "Form: Search(Container,theString,searchWhole,Every Occurrence Flag)" if dts else \
+            "Form: Search(container, theString, searchWhole, Every Occurrence Flag)"
+    text, pat = a[0].replace("\r", "\n"), a[1].replace("\r", "\n")
+    if dts and len(pat) < 2:
+        return "String to match must be at least 2 characters long"
+    if v12 and not pat:
+        return ""
+    whole = _bool_param(a[2])
+    if whole is None:
+        if not v12:
+            return ""
+        whole = False
+    every = len(a) == 4
+    hay = _ascii_upper(text) if v12 else text
+    if v12:
+        pat = _ascii_upper(pat)
+    out, line, item, i, n = [], 1, 1, 0, len(text)
+    while True:
+        if hay.startswith(pat, i):
+            out.append(("%d,%d,%d\n" % (line, item, i + 1)) if v12 else "%d,%d\n" % (line, item))
+            if not every:
+                break
+        if i >= n:
+            break
+        if whole:       # on to the next word
+            stop = False
+            while True:
+                c = text[i] if i < n else ""
+                if c == "":
+                    stop = True
+                elif c == "\n":
+                    line += 1
+                    stop = True
+                elif c == " ":
+                    stop = True
+                elif c == ",":
+                    item += 1
+                i += 1
+                if stop:
+                    break
+            if i > n or (i == n and stop):
+                break
+        else:
+            c = text[i]
+            if c == "\n":
+                line += 1
+            elif c == ",":
+                item += 1
+            i += 1
+    return "".join(out)
+
+
 @xfcn("Substitute")
 def substitute(it, a):
     """Substitute(characters, replacement, text) by Eric Celeste: each of
