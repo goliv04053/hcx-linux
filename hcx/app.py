@@ -18,7 +18,7 @@ from . import i18n  # noqa: E402
 from .i18n import _  # noqa: E402
 
 APP_ID = "io.github.pgostation.HCX"
-VERSION = "3.2"
+VERSION = "3.3"
 RESTART = False
 
 CSS = """
