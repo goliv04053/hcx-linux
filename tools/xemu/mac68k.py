@@ -14,6 +14,7 @@ callbacks in xcmdrun.py.
 import ctypes
 import os
 import struct
+import sys
 
 MEM_SIZE = 0x01000000
 
@@ -78,6 +79,8 @@ def library():
                 lib.m68k_set_reg.argtypes = [ctypes.c_int, ctypes.c_uint]
                 lib.hcx_set_stubs.argtypes = [ctypes.c_uint, ctypes.c_uint]
                 lib.hcx_disasm.argtypes = [ctypes.c_uint, ctypes.c_char_p]
+                if hasattr(lib, "hcx_history"):
+                    lib.hcx_history.argtypes = [ctypes.c_void_p]
                 lib.hcx_disasm.restype = ctypes.c_uint
                 _LIB = lib
                 break
@@ -359,7 +362,22 @@ class Machine:
             what = names.get(vec, "trap #%d" % (vec - 32) if 32 <= vec < 48 else "exception %d" % vec)
             if 32 <= vec < 48:
                 raise Unimplemented("TRAP #%d" % (vec - 32))
+            if os.environ.get("XEMU_TRACE"):
+                hist = self.history()
+                low = [i for i, a in enumerate(hist) if a < 0x400]
+                if low:     # ran into low memory: show what led there
+                    hist = hist[max(0, low[0] - 40):low[0] + 2]
+                for a in hist[-60:]:
+                    print("   %06X  %s" % (a, self.disasm(a)[1]), file=sys.stderr)
             raise EmuError("%s at %06X (%s)" % (what, pc, self.disasm(pc)[1]))
+
+    def history(self):
+        """Addresses of the last instructions run (1024 at most), oldest first."""
+        if not hasattr(self.lib, "hcx_history"):
+            return []
+        buf = (ctypes.c_uint * 1024)()
+        self.lib.hcx_history(buf)
+        return [a & 0xFFFFFF for a in buf]
 
 
 class Heap:

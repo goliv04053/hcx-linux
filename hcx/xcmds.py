@@ -427,6 +427,268 @@ def full_find(it, a):
     return "\n".join(found)
 
 
+def _strip_marks(text):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c))
+
+
+def _intl_key(text):
+    """Sort key like the International Utilities' IUMagString: letters
+    without case or accents first, then the Mac Roman bytes break ties."""
+    return (_strip_marks(text).upper(), text.encode("mac_roman", "replace"))
+
+
+_SEP_NAMES = {"space": " ", "return": "\n", "tab": "\t", "quote": '"'}
+
+
+def _number_35(s):
+    """FullSort 3.5's number in a string: digits from the first digit (or
+    point), then any one character followed by digits is the decimal
+    point; a minus sign just before makes it negative."""
+    i = next((k for k, c in enumerate(s) if c.isdigit() or c == "."), -1)
+    if i < 0:
+        return None
+    neg = i > 0 and s[i - 1] == "-"
+    j = i
+    while j < len(s) and s[j].isdigit():
+        j += 1
+    whole = s[i:j]
+    frac = ""
+    if j + 1 < len(s) and s[j + 1].isdigit():
+        k = j + 1
+        while k < len(s) and s[k].isdigit():
+            k += 1
+        frac = s[j + 1:k]
+    v = float((whole or "0") + "." + (frac or "0"))
+    return -v if neg else v
+
+
+def _number_39(s):
+    """FullSort 3.9's: the number that starts at the first digit (with a
+    point and a sign just before it), read like SANE's str2num."""
+    import re
+    i = next((k for k, c in enumerate(s) if c.isdigit()), -1)
+    if i < 0:
+        return None
+    if i > 0 and s[i - 1] == ".":
+        i -= 1
+    if i > 0 and s[i - 1] in "+-":
+        i -= 1
+    return float(re.match(r"[+-]?\d*\.?\d*(?:[eE][+-]?\d+)?", s[i:]).group(0))
+
+
+def _date_key(s, time_only):
+    import re
+    if time_only:
+        mt = re.search(r"(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?", s)
+        if not mt:
+            return None
+        h, mi, sec = int(mt.group(1)), int(mt.group(2)), int(mt.group(3) or 0)
+        ampm = (mt.group(4) or "").upper()
+        if ampm:
+            h = h % 12 + (12 if ampm == "PM" else 0)
+        return (h, mi, sec)
+    mt = re.search(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})", s)
+    if not mt:
+        return None
+    mo, d, y = int(mt.group(1)), int(mt.group(2)), int(mt.group(3))
+    if y < 100:
+        y += 1900 if y >= 4 else 2000   # the Mac's window: 1904-2003
+    return (y, mo, d)
+
+
+def _sort_chunk(entry, chunk, item_delim):
+    """The sort key of one entry for "c=char|word|item x[ to y]", or None
+    when the entry doesn't have that chunk."""
+    kind, first, last = chunk
+    if kind == "char":
+        if last == "*" or len(entry) < first:
+            return None
+        return entry[first - 1:(last or first)]
+    if kind == "word":
+        import re
+        spans = [m.span() for m in re.finditer(r"[^ ]+", entry)]
+    else:
+        spans, start = [], 0
+        for part in entry.split(item_delim):
+            spans.append((start, start + len(part)))
+            start += len(part) + len(item_delim)
+        if last == "*":
+            return None
+    if len(spans) < first:
+        return None
+    end = spans[-1][1] if last == "*" else spans[min(last or first, len(spans)) - 1][1]
+    return entry[spans[first - 1][0]:end]
+
+
+@xfcn("FullSort")
+def full_sort(it, a):
+    """FullSort(text[, "l=<sep>"][, "i=<sep>"][, "t=a|n|d|i|t|u"][,
+    "d=a|d|r|l"][, "c=char|word|item x[ to y|*]"][, sort list]) by
+    Frédéric Rinaldi. Sorts the lines (or the items, or the words: the
+    separator is found in the text) and puts the new order in the global
+    FullSortList, so "d=l" can sort another list the same way. Entries
+    without the sort key keep their order at the end. Follows versions
+    2.7 to 4.0, which differ in small ways."""
+    import random
+    import re
+    code = _ext_code(it, "FullSort")
+    mt = re.search(rb"FullSort (\d+)\.(\d+)", code)
+    ver = (int(mt.group(1)), int(mt.group(2))) if mt else (4, 0)
+    new = ver >= (3, 6)
+    a = [str(x) for x in a]
+
+    def fail(msg):
+        it.globals["fullsortlist"] = ""
+        it.globals["fullsortsep"] = ""
+        return "Error : " + msg
+
+    if not a:
+        return fail("Missing input parameter")
+    text = a[0]
+    if text in ("!", "?", "="):
+        return {"!": "FullSort %d.%d, © Frederic RINALDI %s" % (ver + ({
+                    (2, 7): "1990,1991", (3, 9): "1990…1993", (4, 0): "1990…1998"}.get(ver, "1990…1992"),)),
+                "?": 'FullSort(<text>[,"%s"][,"t=a|n|d|i|t|u"][,"d=a|d|r|l"]'
+                     '[,"c=char x|word x|item x[ to y|*]"][,<sort list>]' %
+                     ('s=<sep>' if ver < (2, 8) else 'l=<sep>"][,"i=<sep>'),
+                "=": "<sorted list>"}[text]
+    if not text and ver >= (2, 8):
+        return ""
+    first_chars = "TDCS" if ver < (2, 8) else "TDCLIS"
+    letters = "[t,d,c,s]" if ver < (2, 8) else "[t,d,c,l,i]"
+    sort_type = direction = chunk = line_sep = item_sep = sort_list = None
+    for p in a[1:]:
+        if p[:1].isdigit() and sort_list is None:
+            sort_list = p
+            continue
+        if p[:1].upper() not in first_chars or not p:
+            return fail("First char of param 2..n must be " + letters)
+        if p[1:2] != "=":
+            return fail('Second char of param 2..n must be "="')
+        key, val = p[0].upper(), p[2:]
+        if key == "T":
+            if sort_type:
+                return fail("Sort type defined twice")
+            if val[:1].upper() not in tuple("ADINTU"):
+                return fail('Char following "T=" must be [a,d,i,n,t,u]')
+            sort_type = val[0].upper()
+        elif key == "D":
+            if direction:
+                return fail("Sort direction defined twice")
+            if val[:1].upper() not in tuple("ADRL"):
+                return fail('Char following "D=" must be [a,d,r,l]')
+            direction = val[0].upper()
+        elif key in ("L", "S", "I"):
+            sep = val if len(val) == 1 else _SEP_NAMES.get(val.lower())
+            if key == "I":
+                if item_sep is not None:
+                    return fail("Item separator defined twice")
+            elif line_sep is not None:
+                return fail("Line separator defined twice")
+            if sep is None:
+                return fail("Bad separator param" if new else "Bad line separator param")
+            if key == "I":
+                item_sep = sep
+            else:
+                line_sep = sep
+        else:
+            if chunk:
+                return fail("Sort chunk defined twice")
+            up = p.upper()
+            kind = up[2:6]
+            if kind not in ("CHAR", "WORD", "ITEM"):
+                return fail('"C=" %smust be followed by [char,word,item]' % ("param " if ver < (2, 8) else ""))
+            if up[6:7] != " ":
+                return fail('"C=%s" must be followed by a space' % kind)
+            m = re.match(r"\d+", up[7:])
+            if not m or int(m.group(0)) < 1:
+                return fail('"%s" must be followed by a positive integer' % up[:7])
+            start, rest = int(m.group(0)), up[7 + m.end():]
+            stop = None
+            if rest:
+                if not rest.startswith(" TO ") or len(rest) == 4:
+                    return fail('"%s" must be followed by " to X"' % up[:7 + m.end()])
+                tail = rest[4:]
+                if tail[:1] == "*":
+                    stop = "*"
+                else:
+                    m2 = re.match(r"\d+", tail)
+                    if not m2 or int(m2.group(0)) < 1:
+                        return fail('" to " must be followed by a positive integer or "*"')
+                    stop = int(m2.group(0))
+                    if stop < start:
+                        return fail("Stop chunk must be greater that start chunk")
+            chunk = (kind.lower(), start, stop)
+    sort_type, direction = sort_type or "A", direction or "A"
+    if not text:        # only 2.7 gets here with no text
+        it.globals["fullsortlist"] = it.globals["fullsortsep"] = ""
+        return ""
+    if sort_type in ("D", "T") and not chunk and ver >= (2, 8):
+        return fail("Need to define a chunk for date/time sorting" if new else
+                    "Chunk param required for date/time sorting")
+    if item_sep is None:
+        item_sep = it.props.get("itemdelimiter", ",") if ver >= (2, 8) else ","
+    auto = line_sep is None
+    if auto:
+        if new and chunk and chunk[0] == "item":
+            line_sep = "\n"
+        else:
+            line_sep = next((c for c in ("\n", ",", " ") if c in text and (c != " " or ver >= (2, 8))),
+                            "\n" if ver >= (2, 8) else ",")
+    if chunk and chunk[0] == "word" and line_sep == " ":
+        return fail('"c=word" cannot be used with word sorting')
+    if chunk and chunk[0] == "item" and line_sep == item_sep and (auto or new) and ver >= (2, 8):
+        return fail("Line and item delimiters must be different")
+    if ver < (2, 8) and text.endswith("\n"):
+        text = text[:-1]
+    entries = text.split(line_sep)
+    trailing = ""
+    if entries[-1] == "" and len(entries) > 1 and ver >= (2, 8) and not new:
+        entries.pop()
+        trailing = line_sep if ver >= (3, 5) else ""
+    if direction == "L":
+        if sort_list is None:
+            sort_list = it.globals.get("fullsortlist", "")
+            if not sort_list:
+                return fail("Missing Sort list parameter")
+        order = []
+        for n, x in enumerate(sort_list.split(","), 1):
+            if not x.isdigit() or int(x) < 1:
+                return fail("Bad item %d in Sort list" % n)
+            order.append(int(x))
+        out = [entries[k - 1] if k <= len(entries) else "" for k in order]
+        out += entries[len(order):]
+        return line_sep.join(out) + ("" if new else trailing)
+    keyed, rest = [], []
+    for n, e in enumerate(entries):
+        k = _sort_chunk(e, chunk, item_sep) if chunk else e
+        if k is not None and sort_type == "N":
+            k = (_number_39 if new else _number_35)(k)
+        elif k is not None and sort_type in ("D", "T"):
+            k = _date_key(k, sort_type == "T")
+        elif k is not None and sort_type == "U":
+            k = _strip_marks(k).upper()
+        elif k is not None and sort_type == "I":
+            k = _intl_key(k)
+        elif k is not None:
+            k = k.encode("mac_roman", "replace")
+        if k is None or (new and e == ""):
+            rest.append(n)
+        else:
+            keyed.append((k, n))
+    if direction == "R":
+        random.shuffle(keyed)
+        order = [n for _k, n in keyed]
+    else:
+        order = [n for _k, n in sorted(keyed, key=lambda t: t[0], reverse=direction == "D")]
+    order += rest
+    it.globals["fullsortlist"] = ",".join(str(n + 1) for n in order)
+    it.globals["fullsortsep"] = line_sep
+    out = line_sep.join(entries[n] for n in order)
+    return out + trailing if not new else out
+
+
 @xfcn("Substitute")
 def substitute(it, a):
     """Substitute(characters, replacement, text) by Eric Celeste: each of

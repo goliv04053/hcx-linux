@@ -306,7 +306,18 @@ def _str_to_bool(r):
 
 @_cb(STR_TO_EXT)
 def _str_to_ext(r):
-    r.m.wbytes(r.arg(1), _float_to_ext80(float(_num_of(r, r.pas(r.arg(0))))))
+    """Like SANE's str2num: the longest number at the start of the string
+    (after spaces) counts, and a string with none is a NaN."""
+    from . import sane
+    raw = r.m.pstr(r.arg(0)).decode("mac_roman", "replace")
+    _end, (sgn, exp, sig), _ok = sane.str2dec(raw, 0)
+    if sig[:1] == "N":
+        x = float("nan")
+    elif sig[:1] == "I":
+        x = float("inf")
+    else:
+        x = float("%se%d" % (sig, exp))
+    r.m.wbytes(r.arg(1), _float_to_ext80(-x if sgn else x))
 
 
 @_cb(LONG_TO_STR)

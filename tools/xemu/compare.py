@@ -14,7 +14,8 @@ to put files in the sandbox first (both sides see the same files; each
 case starts from a fresh copy).
 Run it from the top of the repository with the Python that has GTK (the
 stack is imported to a temporary folder first). Files the externals read
-or write go to a temporary sandbox, never to ~/.local/share/hcx."""
+or write go to a temporary sandbox, never to ~/.local/share/hcx. Globals the
+externals set are compared too."""
 
 import json
 import os
@@ -138,11 +139,15 @@ def sandbox(files):
 def compare(h, name, kind, code, params, files=None):
     it = h.interp
     h.lines.clear()
+    globs = dict(it.globals)
     snap = sandbox(files or {})
     emu = xcmdrun.emulate(it, name, kind, params, code)
     emu_files = snap()
+    emu_globs = dict(it.globals)
     emu_log = list(h.lines)
     h.lines.clear()
+    it.globals.clear()
+    it.globals.update(globs)
     snap = sandbox(files or {})
     xcmds._EXT_OVERRIDE[name.lower()] = code
     try:
@@ -150,8 +155,12 @@ def compare(h, name, kind, code, params, files=None):
     finally:
         xcmds._EXT_OVERRIDE.clear()
     nat_files = snap()
+    nat_globs = dict(it.globals)
+    it.globals.clear()
+    it.globals.update(globs)
     same = emu.get("error") is None and nat.get("error") is None and \
-        (emu.get("result") or "") == (nat.get("result") or "") and emu_files == nat_files
+        (emu.get("result") or "") == (nat.get("result") or "") and emu_files == nat_files and \
+        emu_globs == nat_globs
     print("%s %s %s" % ("=" if same else "≠", name, json.dumps(params, ensure_ascii=False)))
     print("   original: %s%s" % (_show(emu.get("result")), "   [%s]" % emu["error"] if emu.get("error") else ""))
     print("   native:   %s%s" % (_show(nat.get("result")), "   [%s]" % nat["error"] if nat.get("error") else ""))
@@ -163,6 +172,9 @@ def compare(h, name, kind, code, params, files=None):
         for k in sorted(set(emu_files) | set(nat_files)):
             if emu_files.get(k, 0) != nat_files.get(k, 0):
                 print("   file %s: original %s, native %s" % (k, _short(emu_files.get(k, 0)), _short(nat_files.get(k, 0))))
+    for k in sorted(set(emu_globs) | set(nat_globs)):
+        if emu_globs.get(k) != nat_globs.get(k):
+            print("   global %s: original %s, native %s" % (k, _show(emu_globs.get(k)), _show(nat_globs.get(k))))
     for line in emu_log + h.lines:
         print("   log: %s" % line)
     return same

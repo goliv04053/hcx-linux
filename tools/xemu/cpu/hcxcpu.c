@@ -16,6 +16,7 @@ static unsigned int stub_lo, stub_hi;  /* [lo, hi): reaching these stops the CPU
 static unsigned int stop_pc;
 static int stopped;
 static unsigned long long icount;
+static unsigned int history[1024];       /* the last instructions run, for debugging crashes */
 
 unsigned char *hcx_mem(void) { return mem; }
 unsigned int hcx_mem_size(void) { return MEM_SIZE; }
@@ -36,6 +37,7 @@ void hcx_set_stubs(unsigned int lo, unsigned int hi) { stub_lo = lo; stub_hi = h
 
 void hcx_instr_hook(unsigned int pc)
 {
+    history[icount & 1023] = pc;
     icount++;
     pc = ADDR(pc);
     if (pc >= stub_lo && pc < stub_hi) {
@@ -55,6 +57,13 @@ unsigned int hcx_run(int cycles)
 }
 
 unsigned long long hcx_icount(void) { return icount; }
+
+/* The addresses of the last 1024 instructions run, oldest first. */
+void hcx_history(unsigned int *out)
+{
+    for (int i = 0; i < 1024; i++)
+        out[i] = history[(icount + i) & 1023];
+}
 
 /* Memory access for Musashi (big-endian). */
 unsigned int m68k_read_memory_8(unsigned int a) { return mem[ADDR(a)]; }

@@ -11,6 +11,7 @@ exactly what's missing."""
 import collections
 import time
 
+from . import sane
 from .mac68k import Unimplemented, noErr, memFullErr, nilHandleErr, resNotFound
 
 MAC_EPOCH = 2082844800      # seconds from 1904 to 1970
@@ -600,6 +601,8 @@ def _pack7(tb, op):
             if c.isdigit():
                 n = n * 10 + int(c)
         m.set_d(0, -n if neg else n)
+    elif sel in (2, 4):     # PStr2Dec / CStr2Dec
+        sane.pack7(tb, sel)
     else:
         raise Unimplemented("Pack7 selector %d" % sel)
 
@@ -1421,6 +1424,18 @@ def _te_dispose(tb, op):
     heap.dispose(hte)
 
 
+@tb_trap(0xA861)
+def _random(tb, op):
+    """Random: QuickDraw's Park-Miller generator on randSeed."""
+    m = tb.m
+    seed_at = m.r32(m.r32(0x904)) - 126       # (CurrentA5) -> thePort; randSeed before it
+    seed = m.r32(seed_at) or 1
+    seed = seed * 16807 % 0x7FFFFFFF
+    m.w32(seed_at, seed)
+    v = seed & 0xFFFF
+    tb.ret16(0 if v == 0x8000 else v)
+
+
 @tb_trap(0xA9B9)
 def _get_cursor(tb, op):
     rid = tb.m.pops16()
@@ -1474,6 +1489,11 @@ def _mag_compare(a, b):
     if pa != pb:
         return -1 if pa < pb else 1
     return 0 if a == b else (-1 if a < b else 1)
+
+
+@tb_trap(0xA9EB)
+def _pack4(tb, op):
+    sane.pack4(tb)
 
 
 @tb_trap(0xA9ED)
@@ -1549,6 +1569,8 @@ def _script_util(tb, op):
         else:
             b = min(i + 1, n)
         m.wbytes(offsets, a.to_bytes(2, "big") + b.to_bytes(2, "big") + bytes(8))
+    elif routine == 0xFFF8:                    # InitDateCache(cache)
+        res = 0
     else:
         raise Unimplemented("ScriptUtil selector %08X" % sel)
     if nres == 4:
