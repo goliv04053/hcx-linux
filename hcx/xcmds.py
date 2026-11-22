@@ -1063,6 +1063,304 @@ def create_folder(it, a):
         it.result = str(e)
 
 
+# -- Finder info and Mac paths, for Frederic Rinaldi's file externals --------------------------
+# Type and creator live in an extended attribute, as tools/xemu's File
+# Manager keeps them; a file without one gets a type from its name.
+
+_FINDER_XATTR = "user.hcx.finderinfo"
+
+
+def _finder_info(path):
+    """(type, creator, flags) of a file."""
+    try:
+        v = os.getxattr(path, _FINDER_XATTR)
+        if len(v) >= 8:
+            return v[:4], v[4:8], int.from_bytes(v[8:10], "big") if len(v) >= 10 else 0
+    except (OSError, AttributeError):
+        pass
+    low = path.lower()
+    if low.endswith((".txt", ".text")) or "." not in os.path.basename(path):
+        return b"TEXT", b"ttxt", 0
+    if low.endswith((".pict", ".pct")):
+        return b"PICT", b"ttxt", 0
+    return b"BINA", b"????", 0
+
+
+def _set_finder_info(path, ftype=None, creator=None):
+    old_t, old_c, flags = _finder_info(path)
+    try:
+        os.setxattr(path, _FINDER_XATTR, (ftype or old_t) + (creator or old_c) + flags.to_bytes(2, "big"))
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
+def _ci_match(folder, name):
+    """The entry of folder called name, in any case, as HFS finds it."""
+    p = os.path.join(folder, name)
+    if os.path.lexists(p):
+        return p
+    try:
+        for n in os.listdir(folder):
+            if n.lower() == name.lower():
+                return os.path.join(folder, n)
+    except OSError:
+        pass
+    return p
+
+
+def _mac_resolve(path):
+    """("", local path) for a Mac path, or (error, None) with the error the
+    File Manager would give: "nsv" (no such volume), "dirnf" (a folder on
+    the way is missing) or "bdnam". Names match in any case, "::" goes up a
+    folder and a colon at the end is ignored. A name with no volume is
+    looked for where HCX keeps such files (see hthost.mac_to_local)."""
+    import re
+    from .hthost import files_root
+    root = files_root()
+    path = str(path)
+    if ":" in path and not path.startswith(":"):
+        vol, _, rest = path.partition(":")
+        base = _ci_match(root, vol.replace("/", "_"))
+        if not vol or not os.path.isdir(base):
+            return "nsv", None
+        parts = rest.split(":")
+    else:
+        base, parts = root, (path[1:] if path.startswith(":") else path).split(":")
+    if len(parts) > 1 and parts[-1] == "":
+        parts.pop()
+    top, cur = base, base
+    for i, part in enumerate(parts):
+        last = i == len(parts) - 1
+        if part == "":
+            if not last and cur != top:
+                cur = os.path.dirname(cur)
+            continue
+        nxt = _ci_match(cur, re.sub(r"[/\x00]", "_", part))
+        if not last and not os.path.isdir(nxt):
+            return "dirnf", None
+        cur = nxt
+    return "", cur
+
+
+def _is_volume(path):
+    from .hthost import files_root
+    return os.path.dirname(os.path.realpath(path)) == os.path.realpath(files_root())
+
+
+def _mac_date(t, form):
+    """A file date as the Mac's International Utilities print it (US)."""
+    import time
+    lt = time.localtime(t)
+    if form == "date":
+        return time.strftime("%-m/%-d/%y", lt)
+    return time.strftime("%-I:%M:%S %p", lt)
+
+
+_RINALDI_ERR = {"nsv": "Volume not found", "dirnf": "Folder not found", "fnf": "File not found",
+                "bdnam": "Bad Name", "notfile": "Not a file", "busy": "File is busy", "io": "I/O Error",
+                "locked": "Volume is locked", "dup": "Duplicate file/folder name"}
+
+
+def _rinaldi_version(code, name):
+    import re
+    m = re.search(rb"%s (\d+)\.(\d+)" % name.encode(), code) or re.search(rb"Version (\d+)\.(\d+)", code)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+@xfcn("GetFInfo", "GetFileInfo")
+def get_finfo(it, a):
+    """Frederic Rinaldi's GetFInfo 1.0 to 1.5: "type,creator,creDate,
+    creTime,modDate,modTime,size,data size,resource size" and the 16
+    Finder flags as booleans (1.5 adds the space the file takes on disk)."""
+    import time
+    code = _ext_code(it, "GetFInfo") or _ext_code(it, "GetFileInfo")
+    ver = _rinaldi_version(code, "GetFileInfo")
+    v10 = ver < (1, 2)
+    a = [str(x) for x in a]
+    first = a[0] if a else ""
+    if v10:
+        if a == ["!"]:
+            return "Version 1.0, © Frederic RINALDI 1990"
+        if a == ["?"]:
+            return "GetFInfo <file path or name>"
+        if not a:
+            return "Error : Missing parameter(s)"
+        if first.endswith(":"):
+            return "Error : First param must not end with colon"
+        if ":" not in first.lstrip(":"):     # 1.0 wants a full path
+            return "Error : Volume not found"
+    else:
+        if len(a) == 1 and first in ("!", "?", "="):
+            return {"!": "GetFileInfo %d.%d, © Frederic RINALDI 1990%s" % (
+                        ver + ({(1, 2): ",1991", (1, 3): "…1993", (1, 4): "…1998"}.get(ver, "…1999"),)),
+                    "?": 'GetFileInfo <file path or name>[,"DontResolveAlias"]',
+                    "=": "<type>,<creator>,<creDate>,<creTime>,<modDate>,<modTime>,<size>,<data len>,"
+                         "<res len>,<flag 1>…<flag 16>"}[first]
+        if not first:
+            return "Error : Missing or empty parameter(s)"
+        if len(a) > 1 and a[1].lower() != "dontresolvealias":
+            return 'Error : Second param can only be "DontResolveAlias"'
+    err, path = _mac_resolve(first)
+    if not err:
+        if not os.path.lexists(path):
+            err = "fnf"
+        elif os.path.isdir(path):
+            err = "fnf" if v10 else "notfile"
+    if err:
+        msg = _RINALDI_ERR[err]
+        return "Error : " + ("Directory not found" if v10 and err == "dirnf" else msg)
+    st = os.stat(path)
+    ftype, creator, flags = _finder_info(path)
+    size = st.st_size
+    if ver == (1, 2):       # its own date format
+        lt = time.localtime(st.st_mtime)
+        h = lt.tm_hour if lt.tm_hour <= 12 else lt.tm_hour - 12
+        d = "%02d/%02d/%04d" % (lt.tm_mon, lt.tm_mday, lt.tm_year)
+        t = "%02d:%02d:%02d %s" % (h, lt.tm_min, lt.tm_sec, "PM" if lt.tm_hour > 12 else "AM")
+    else:
+        d, t = _mac_date(st.st_mtime, "date"), _mac_date(st.st_mtime, "time")
+    out = [ftype.decode("mac_roman"), creator.decode("mac_roman"), d, t, d, t]
+    if v10:
+        out = out[:3] + [d]
+    out += [str(size), str(size), "0"]
+    out += ["true" if flags & (1 << i) else "false" for i in range(16)]
+    if ver >= (1, 5):
+        out.append(str((size + 511) // 512 * 512))
+    return ",".join(out)
+
+
+@xcmd("SetFInfo", "SetFileInfo")
+def set_finfo(it, a):
+    """Frederic Rinaldi's SetFInfo 1.0, 1.1 and 1.4: SetFInfo file
+    [,"t=type"][,"c=creator"][,"m=date"][,"e=date"][,"DontResolveAlias"].
+    Errors go to the result. Linux keeps no creation date, so e= is only
+    checked."""
+    code = _ext_code(it, "SetFInfo") or _ext_code(it, "SetFileInfo")
+    import re
+    m = re.search(rb"SetF(?:ile)?Info (\d)\.(\d)", code)
+    ver = (int(m.group(1)), int(m.group(2))) if m else (1, 0)
+    dates = ver >= (1, 1)
+    a = [str(x) for x in a]
+    first = a[0] if a else ""
+    if len(a) == 1 and first in ("!", "?", "="):
+        name = "SetFInfo" if ver != (1, 1) else "SetFileInfo"
+        it.result = {
+            "!": "SetFInfo 1.0, © Frederic RINALDI 1992" if not dates else
+                 "68K_%s %d.%d, © Frederic RINALDI 1992…%s" % (name, ver[0], ver[1], "2001" if ver >= (1, 4) else "1999"),
+            "?": ("SetFileInfo" if ver < (1, 4) else "SetFInfo") + " <file path or name>[,<t=type>][,<c=creator>]" +
+                 ("[,<m=modification date>][,<e=creation date>]" if dates else "") + '[,"DontResolveAlias"]',
+            "=": "[<error>]"}[first]
+        return
+    if not first:
+        it.result = "Error : Missing or empty parameter(s)"
+        return
+    ftype = creator = mtime = None
+    prev = ""
+    for n, p in enumerate(a[1:], 2):
+        if dates and p == "" and prev in ("t=", "c="):
+            p = prev        # 1.1 and later read the empty param as the one before
+        key = p[:2].lower()
+        val = p[2:]
+        if key in ("t=", "c="):
+            if len(val) != 4:
+                it.result = ("Error : Bad file type" if key == "t=" else "Error : Bad file creator") if dates \
+                    else "Error : Bad param #%d" % n
+                return
+            if key == "t=":
+                ftype = val.encode("mac_roman", "replace")
+            else:
+                creator = val.encode("mac_roman", "replace")
+        elif dates and key in ("m=", "e="):
+            try:
+                t = ht._parse_date(val)
+            except ValueError:
+                it.result = "Error : Bad param #%d" % n
+                return
+            if key == "m=":
+                mtime = t
+        elif p.lower() != "dontresolvealias":
+            it.result = "Error : Bad param #%d" % n
+            return
+        prev = key
+    err, path = _mac_resolve(first)
+    if not err:
+        if not os.path.lexists(path):
+            err = "fnf"
+        elif os.path.isdir(path):
+            err = "notfile"
+    if err:
+        it.result = "Error : " + _RINALDI_ERR[err]
+        return
+    _set_finder_info(path, ftype, creator)
+    if mtime is not None:
+        try:
+            os.utime(path, (mtime, mtime))
+        except OSError:
+            it.result = "Error : I/O Error"
+
+
+@xcmd("EraseFile")
+def erase_file(it, a):
+    """Frederic Rinaldi's EraseFile 1.0 to 1.2: deletes a file in HCX's
+    folder for Mac files (1.0 also deletes an empty folder). Errors go to
+    the result."""
+    code = _ext_code(it, "EraseFile")
+    ver = _rinaldi_version(code, "EraseFile")
+    v10 = ver < (1, 1)
+    a = [str(x) for x in a]
+    first = a[0] if a else ""
+    if v10:
+        if a == ["!"]:
+            it.result = "Version 1.0, © Frederic RINALDI 1990"
+            return
+        if a == ["?"]:
+            it.result = "EraseFile <file path or name>"
+            return
+        if not a:
+            it.result = "Error : Missing parameter(s)"
+            return
+        if first.endswith(":"):
+            it.result = "Error : First param must not end with colon"
+            return
+        if ":" not in first.lstrip(":"):
+            it.result = "Error : Volume not found"
+            return
+    else:
+        if len(a) == 1 and first in ("!", "?", "="):
+            it.result = {"!": "EraseFile %d.%d, © Frederic RINALDI 1991" % ver,
+                         "?": 'EraseFile <file path|name>[,"DontResolveAlias"]',
+                         "=": "<error> if any"}[first]
+            return
+        if not first:
+            it.result = "Error : Missing or empty parameter(s)"
+            return
+        if len(a) > 1 and a[1].lower() != "dontresolvealias":
+            it.result = 'Error : Second param can only be "DontResolveAlias"'
+            return
+    err, path = _mac_resolve(first)
+    if not err:
+        if not os.path.lexists(path):
+            err = "fnf"
+        elif os.path.isdir(path):
+            if not v10:
+                err = "notfile"
+            elif any(not n.startswith(".") for n in os.listdir(path)):
+                err = "busy"
+            elif _is_volume(path):
+                err = "busy"
+    if not err:
+        try:
+            if os.path.isdir(path):
+                os.rmdir(path)
+            else:
+                os.remove(path)
+        except OSError:
+            err = "io"
+    if err:
+        it.result = "Error : " + ("Directory not found" if v10 and err == "dirnf" else _RINALDI_ERR[err])
+
+
 # -- Voyager's indexed data files ------------------------------------------------------------
 # The Library of the Expanded Books saves the reader's marks ("Export
 # markings") as a data file of entries, each a 4-byte length and the bytes,

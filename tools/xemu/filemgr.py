@@ -13,9 +13,11 @@ and in ioResult, as on the Mac. Only the synchronous forms are useful
 here, and asynchronous calls finish at once without calling ioCompletion.
 """
 
+import calendar
 import os
 import shutil
 import struct
+import time
 
 from .mac68k import Unimplemented
 
@@ -54,7 +56,8 @@ def _root():
 
 
 def _mac_time(t):
-    return int(t + MAC_EPOCH) & 0xFFFFFFFF
+    """A Mac date: seconds from 1904 in local time."""
+    return int(calendar.timegm(time.localtime(t)) + MAC_EPOCH) & 0xFFFFFFFF
 
 
 def _to_local_name(raw):
@@ -867,8 +870,99 @@ def _hfs_dispatch(tb, op):
     raise Unimplemented("HFSDispatch selector %d" % sel)
 
 
-def install(os_trap):
+# -- FSSpec calls (HighLevelFSDispatch, System 7) ---------------------------------------------
+
+def _spec_path(fm, m, spec):
+    """(error, path, vref) for an FSSpec."""
+    vref, parid, name = m.s16(spec), m.r32(spec + 2), m.pstr(spec + 6)
+    if parid == 1:
+        vref, _d = fm._vref_dir(vref, 0)
+        if vref not in fm.vols:
+            return nsvErr, None, None
+        return noErr, fm.vol_path(vref), vref
+    return fm.resolve(vref, parid, name)
+
+
+def _high_level_fs(tb, op):
+    """Pascal calls with the selector in D0: the OSErr result sits above
+    the arguments."""
+    fm, m = _fm(tb), tb.m
+    sel = m.d(0) & 0xFFFF
+    if sel == 1:            # FSMakeFSSpec(vRefNum, dirID, fileName, VAR spec)
+        spec = m.pop32()
+        name_p = m.pop32()
+        dirid = m.pop32()
+        vref = m.pops16()
+        name = m.pstr(name_p) if name_p else b""
+        err, path, v = fm.resolve(vref, dirid, name)
+        if not err:
+            if os.path.realpath(path) == os.path.realpath(fm.vol_path(v)):
+                parent, leaf = 1, fm.vols[v]
+            else:
+                parent, leaf = fm.dir_id(v, os.path.dirname(path)), os.path.basename(path)
+            m.w16(spec, v & 0xFFFF)
+            m.w32(spec + 2, parent)
+            m.wpstr(spec + 6, _to_mac_name(leaf), 63)
+            err = noErr if os.path.lexists(path) else fnfErr
+    elif sel == 6:          # FSpDelete(spec)
+        err, path, v = _spec_path(fm, m, m.pop32())
+        if not err:
+            if not os.path.lexists(path):
+                err = fnfErr
+            elif any(f.path == path for f in fm.fcbs.values()) or \
+                    os.path.realpath(path) == os.path.realpath(fm.vol_path(v)):
+                err = fBsyErr
+            elif os.path.isdir(path):
+                if any(_visible(n) for n in os.listdir(path)):
+                    err = fBsyErr
+                else:
+                    shutil.rmtree(path)
+            else:
+                os.remove(path)
+    elif sel in (7, 8):     # FSpGetFInfo / FSpSetFInfo(spec, fndrInfo)
+        info = m.pop32()
+        err, path, _v = _spec_path(fm, m, m.pop32())
+        if not err:
+            if not os.path.lexists(path):
+                err = fnfErr
+            elif os.path.isdir(path):
+                err = fnfErr
+            elif sel == 7:
+                ftype, creator = fm.get_finfo(path)
+                m.wbytes(info, ftype + creator + b"\0" * 8)
+            else:
+                fm.set_finfo(path, m.rbytes(info, 4), m.rbytes(info + 4, 4))
+    else:
+        raise Unimplemented("HighLevelFSDispatch selector %d" % sel)
+    m.w16(m.sp, err & 0xFFFF)
+    m.set_d(0, err & 0xFFFFFFFF)
+
+
+def _alias_dispatch(tb, op):
+    """The Alias Manager. There are no alias files in the sandbox, so
+    ResolveAliasFile only checks that the file is there."""
+    fm, m = _fm(tb), tb.m
+    sel = m.d(0) & 0xFFFF
+    if sel == 0x0C:         # ResolveAliasFile(VAR spec, chains, VAR isFolder, VAR wasAliased)
+        was_p = m.pop32()
+        folder_p = m.pop32()
+        m.pop16()
+        err, path, _v = _spec_path(fm, m, m.pop32())
+        if not err and not os.path.lexists(path):
+            err = fnfErr
+        m.w8(was_p, 0)
+        m.w8(folder_p, 1 if not err and os.path.isdir(path) else 0)
+    else:
+        raise Unimplemented("AliasDispatch selector %d" % sel)
+    m.w16(m.sp, err & 0xFFFF)
+    m.set_d(0, err & 0xFFFFFFFF)
+
+
+def install(os_trap, tb_trap=None):
     """Registers the File Manager traps with toolbox's os_trap."""
+    if tb_trap:
+        tb_trap(0xAA52)(_high_level_fs)
+        tb_trap(0xA823)(_alias_dispatch)
     os_trap(0xA000)(lambda tb, op: _open(tb, op, False))
     os_trap(0xA00A)(lambda tb, op: _open(tb, op, True))
     os_trap(0xA001)(_close)

@@ -11,7 +11,8 @@ FILE is anything HCX opens (a stack, an archive, a disk image); STACK is
 the name of a stack inside it. CASES.json is a list of [NAME, [PARAM...]],
 or {"files": {"HD:Folder:File": "text", "HD:Empty:": null}, "cases": [...]}
 to put files in the sandbox first (both sides see the same files; each
-case starts from a fresh copy).
+case starts from a fresh copy). A file can also be {"text": "...",
+"mtime": seconds since 1970} to give it a modification date.
 Run it from the top of the repository with the Python that has GTK (the
 stack is imported to a temporary folder first). Files the externals read
 or write go to a temporary sandbox, never to ~/.local/share/hcx. Globals the
@@ -110,6 +111,16 @@ def _show(v):
     return json.dumps(v, ensure_ascii=False)
 
 
+def _finder(path):
+    """A file's type and creator, when an external set them, shown after
+    its contents so that snapshots compare them too."""
+    try:
+        v = os.getxattr(path, "user.hcx.finderinfo")
+    except OSError:
+        return b""
+    return b" {finder info %r}" % v[:8]
+
+
 def sandbox(files):
     """Fresh sandbox contents. Returns a snapshot function."""
     from hcx.hthost import files_root, mac_to_local
@@ -118,12 +129,17 @@ def sandbox(files):
     os.makedirs(os.path.join(root, "HD"), exist_ok=True)
     for mac, text in files.items():
         p = mac_to_local(mac.rstrip(":"))
+        mtime = None
+        if isinstance(text, dict):
+            text, mtime = text.get("text"), text.get("mtime")
         if text is None:
             os.makedirs(p, exist_ok=True)
         else:
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "wb") as fh:
                 fh.write(text.encode("mac_roman", "replace"))
+        if mtime is not None:
+            os.utime(p, (mtime, mtime))
 
     def snapshot():
         out = {}
@@ -131,7 +147,7 @@ def sandbox(files):
             for n in dirs + fs:
                 p = os.path.join(d, n)
                 rel = os.path.relpath(p, root).replace(os.sep, ":")
-                out[rel] = None if os.path.isdir(p) else open(p, "rb").read()
+                out[rel] = None if os.path.isdir(p) else open(p, "rb").read() + _finder(p)
         return out
     return snapshot
 

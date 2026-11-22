@@ -658,6 +658,43 @@ def _sys_environs(tb, op):
     m.set_d(0, 0)
 
 
+# -- bit operations: bit 0 is the high bit of the first byte -------------------------------------
+
+@tb_trap(0xA85D, 0xA85E, 0xA85F)
+def _bit_tst_set_clr(tb, op):
+    m = tb.m
+    n = m.pops32()
+    p = m.pop32() + (n >> 3)
+    mask = 0x80 >> (n & 7)
+    if op & 0x3FF == 0x05D:
+        tb.ret_bool(m.r8(p) & mask)
+    elif op & 0x3FF == 0x05E:
+        m.w8(p, m.r8(p) | mask)
+    else:
+        m.w8(p, m.r8(p) & ~mask & 0xFF)
+
+
+@tb_trap(0xA858, 0xA859, 0xA85B)
+def _bit_and_xor_or(tb, op):
+    m = tb.m
+    b, a = m.pop32(), m.pop32()
+    k = op & 0x3FF
+    tb.ret32(a & b if k == 0x058 else a ^ b if k == 0x059 else a | b)
+
+
+@tb_trap(0xA85A)
+def _bit_not(tb, op):
+    tb.ret32(~tb.m.pop32())
+
+
+@tb_trap(0xA85C)
+def _bit_shift(tb, op):
+    m = tb.m
+    count = m.pops16()
+    v = m.pop32()
+    tb.ret32((v << count) if count >= 0 else (v >> -count))
+
+
 _GESTALT = {
     "sysv": 0x0755, "qd  ": 0x0230, "proc": 3, "fpu ": 1, "mmu ": 2, "ram ": 64 << 20,
     "lram": 64 << 20, "vm  ": 0, "addr": 0, "tabl": 0, "font": 0, "fs  ": 0, "hfs ": 1,
@@ -1500,7 +1537,31 @@ def _pack4(tb, op):
 def _pack6(tb, op):
     m = tb.m
     sel = m.pop16()
-    if sel in (10, 12):     # IUMagString / IUMagIDString(aPtr, bPtr, aLen, bLen)
+    if sel in (0, 2):       # IUDateString(dateTime, form, VAR s) / IUTimeString(dateTime, wantSeconds, VAR s)
+        out = m.pop32()
+        form = m.pop16() >> 8
+        t = time.gmtime(m.pop32() - MAC_EPOCH)
+        if sel == 0:
+            fmt = ("%-m/%-d/%y", "%A, %B %-d, %Y", "%a, %b %-d, %Y")[min(form, 2)]
+        else:
+            fmt = "%-I:%M:%S %p" if form else "%-I:%M %p"
+        m.wpstr(out, time.strftime(fmt, t).encode("mac_roman"), 255)
+    elif sel == 6:          # IUGetIntl(theID): the US international resources
+        n = m.pops16()
+        if n == 0:
+            data = b".,;$\0\0" + bytes([0xD0, 0, 0, ord("/"), 0xFF, 0x60]) + b" AM\0 PM\0:" + \
+                b"\0" * 8 + bytes([0, 0, 0])     # Intl0Rec: metricSys false, intl0Vers 0 (US)
+        elif n == 1:
+            days = b"".join(bytes([len(d)]) + d.ljust(15, b"\0") for d in
+                            (b"Sunday", b"Monday", b"Tuesday", b"Wednesday", b"Thursday", b"Friday", b"Saturday"))
+            months = b"".join(bytes([len(x)]) + x.ljust(15, b"\0") for x in
+                              (b"January", b"February", b"March", b"April", b"May", b"June", b"July",
+                               b"August", b"September", b"October", b"November", b"December"))
+            data = days + months + bytes([0, 0, 0]) + b", , ,\0\0".ljust(20, b"\0") + bytes([0, 3, 0, 0, 0, 0x4E, 0x71])
+        else:
+            raise Unimplemented("IUGetIntl(%d)" % n)
+        tb.ret32(m.heap.new_handle(len(data), data=data))
+    elif sel in (10, 12):     # IUMagString / IUMagIDString(aPtr, bPtr, aLen, bLen)
         blen, alen = m.pops16(), m.pops16()
         bp, ap = m.pop32(), m.pop32()
         a, b = m.rbytes(ap, max(alen, 0)), m.rbytes(bp, max(blen, 0))
@@ -1583,4 +1644,4 @@ def _script_util(tb, op):
 
 from . import filemgr  # noqa: E402
 
-filemgr.install(os_trap)
+filemgr.install(os_trap, tb_trap)
