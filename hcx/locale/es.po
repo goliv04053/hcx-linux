@@ -143,11 +143,11 @@ msgstr "No buscar"
 msgid "Parts"
 msgstr "Objetos"
 
-#: hcx/inspector.py:222 hcx/window.py:123
+#: hcx/inspector.py:222 hcx/window.py:167
 msgid "Buttons"
 msgstr "Botones"
 
-#: hcx/inspector.py:223 hcx/window.py:123
+#: hcx/inspector.py:223 hcx/window.py:167
 msgid "Fields"
 msgstr "Campos"
 
@@ -279,15 +279,27 @@ msgstr "Centrado"
 msgid "Align right"
 msgstr "A la derecha"
 
-#: hcx/scriptui.py:60 hcx/scriptui.py:81 hcx/window.py:1028 hcx/window.py:1214
+#: hcx/scriptui.py:76 hcx/scriptui.py:97 hcx/window.py:1113 hcx/window.py:1304
 msgid "Cancel"
 msgstr "Cancelar"
 
-#: hcx/scriptui.py:61 hcx/scriptui.py:82 hcx/window.py:1148
+#: hcx/scriptui.py:77 hcx/scriptui.py:98 hcx/window.py:1233
 msgid "OK"
 msgstr "Aceptar"
 
-#: hcx/scriptui.py:156
+#: hcx/scriptui.py:351 hcx/window.py:1115
+msgid "Save"
+msgstr "Guardar"
+
+#: hcx/scriptui.py:351
+msgid "Open"
+msgstr "Abrir"
+
+#: hcx/scriptui.py:365 hcx/window.py:1186
+msgid "All files"
+msgstr "Todos los archivos"
+
+#: hcx/scriptui.py:461
 msgid "Close"
 msgstr "Cerrar"
 
@@ -311,224 +323,218 @@ msgstr "Guardando paquete…"
 msgid "Loading…"
 msgstr "Cargando…"
 
-#: hcx/window.py:67
+#: hcx/window.py:111
 msgid "First Card"
 msgstr "Primera tarjeta"
 
-#: hcx/window.py:68
+#: hcx/window.py:112
 msgid "Previous Card"
 msgstr "Tarjeta anterior"
 
-#: hcx/window.py:69
+#: hcx/window.py:113
 msgid "Next Card"
 msgstr "Tarjeta siguiente"
 
-#: hcx/window.py:70
+#: hcx/window.py:114
 msgid "Last Card"
 msgstr "Última tarjeta"
 
-#: hcx/window.py:82 hcx/window.py:63 hcx/window.py:177 hcx/window.py:1099
+#: hcx/window.py:126 hcx/window.py:107 hcx/window.py:221 hcx/window.py:1184
 msgid "Open Stack…"
 msgstr "Abrir pila…"
 
-#: hcx/window.py:83
+#: hcx/window.py:127
 msgid "New Window"
 msgstr "Ventana nueva"
 
-#: hcx/window.py:84
+#: hcx/window.py:128
 msgid "Save Changes"
 msgstr "Guardar cambios"
 
-#: hcx/window.py:87
+#: hcx/window.py:131
 msgid "Find…"
 msgstr "Buscar…"
 
-#: hcx/window.py:88
+#: hcx/window.py:132
 msgid "Print Card…"
 msgstr "Imprimir tarjeta…"
 
-#: hcx/window.py:89
+#: hcx/window.py:133
 msgid "Copy Card as Image"
 msgstr "Copiar tarjeta como imagen"
 
-#: hcx/window.py:90 hcx/window.py:940
+#: hcx/window.py:134 hcx/window.py:1025
 msgid "Export Card as PNG…"
 msgstr "Exportar tarjeta como PNG…"
 
-#: hcx/window.py:94
+#: hcx/window.py:138
 msgid "Automatic"
 msgstr "Automática"
 
-#: hcx/window.py:95
+#: hcx/window.py:139
 msgid "Western (Mac Roman)"
 msgstr "Occidental (Mac Roman)"
 
-#: hcx/window.py:96
+#: hcx/window.py:140
 msgid "Japanese (Shift-JIS)"
 msgstr "Japonés (Shift-JIS)"
 
-#: hcx/window.py:97
+#: hcx/window.py:141
 msgid "Text Encoding"
 msgstr "Codificación del texto"
 
-#: hcx/window.py:98
+#: hcx/window.py:142
 msgid "Reimport Stack"
 msgstr "Volver a importar la pila"
 
-#: hcx/window.py:99 hcx/window.py:1321
+#: hcx/window.py:143 hcx/window.py:1419
 msgid "Export Package…"
 msgstr "Exportar paquete .hcxs…"
 
-#: hcx/window.py:102
+#: hcx/window.py:146
 msgid "System Default"
 msgstr "Predeterminado del sistema"
 
-#: hcx/window.py:106
+#: hcx/window.py:150
 msgid "Language"
 msgstr "Idioma"
 
-#: hcx/window.py:109
+#: hcx/window.py:153
 msgid "About HCX"
 msgstr "Acerca de HCX"
 
-#: hcx/window.py:110
+#: hcx/window.py:154
 msgid "Quit"
 msgstr "Salir"
 
-#: hcx/window.py:112
+#: hcx/window.py:156
 msgid "Menu"
 msgstr "Menú"
 
-#: hcx/window.py:115
+#: hcx/window.py:159
 msgid "Inspector"
 msgstr "Inspector"
 
-#: hcx/window.py:123
+#: hcx/window.py:167
 msgid "Browse"
 msgstr "Navegar"
 
-#: hcx/window.py:130 hcx/window.py:133
+#: hcx/window.py:174 hcx/window.py:177
 msgid "New Button"
 msgstr "Botón nuevo"
 
-#: hcx/window.py:131 hcx/window.py:133
+#: hcx/window.py:175 hcx/window.py:177
 msgid "New Field"
 msgstr "Campo nuevo"
 
-#: hcx/window.py:135
+#: hcx/window.py:179
 msgid "Delete"
 msgstr "Borrar"
 
-#: hcx/window.py:138
+#: hcx/window.py:182
 msgid "Edit Background"
 msgstr "Editar fondo"
 
-#: hcx/window.py:142 hcx/window.py:144 hcx/window.py:146
+#: hcx/window.py:186 hcx/window.py:188 hcx/window.py:190
 msgid "Zoom"
 msgstr "Zoom"
 
-#: hcx/window.py:175
+#: hcx/window.py:219
 msgid "Open a HyperCard Stack"
 msgstr "Abre una pila de HyperCard"
 
-#: hcx/window.py:176
+#: hcx/window.py:220
 msgid "Drop a stack here, or open a stack file, a MacBinary/BinHex/AppleDouble file or an HFS disk image (.img, .dsk, .image)."
 msgstr "Arrastra una pila aquí, o abre un archivo de pila, un archivo MacBinary/BinHex/AppleDouble o una imagen de disco HFS (.img, .dsk, .image)."
 
-#: hcx/window.py:204
+#: hcx/window.py:248
 msgid "Find in all cards"
 msgstr "Buscar en todas las tarjetas"
 
-#: hcx/window.py:210
+#: hcx/window.py:254
 msgid "Find Next"
 msgstr "Buscar siguiente"
 
-#: hcx/window.py:420
+#: hcx/window.py:466
 msgid "Card %d of %d"
 msgstr "Tarjeta %d de %d"
 
-#: hcx/window.py:611
+#: hcx/window.py:677
 msgid "A script is running. Press Esc to stop it."
 msgstr "Hay un script en ejecución. Pulsa Esc para detenerlo."
 
-#: hcx/window.py:901
+#: hcx/window.py:986
 msgid "“%s” was not found."
 msgstr "No se encontró «%s»."
 
-#: hcx/window.py:935
+#: hcx/window.py:1020
 msgid "Card copied as image."
 msgstr "Tarjeta copiada como imagen."
 
-#: hcx/window.py:950
+#: hcx/window.py:1035
 msgid "Saved %s"
 msgstr "%s guardado"
 
-#: hcx/window.py:971
+#: hcx/window.py:1056
 msgid "Printing needs PyGObject's cairo support (sudo dnf install python3-gobject)."
 msgstr "Para imprimir hace falta el soporte de cairo de PyGObject (sudo dnf install python3-gobject)."
 
-#: hcx/window.py:1006
+#: hcx/window.py:1091
 msgid "Changes saved. They stay when you open this stack again."
 msgstr "Cambios guardados. Seguirán ahí cuando vuelvas a abrir esta pila."
 
-#: hcx/window.py:1026
+#: hcx/window.py:1111
 msgid "Save changes?"
 msgstr "¿Guardar los cambios?"
 
-#: hcx/window.py:1027
+#: hcx/window.py:1112
 msgid "This stack has changes that were not saved."
 msgstr "Esta pila tiene cambios sin guardar."
 
-#: hcx/window.py:1029
+#: hcx/window.py:1114
 msgid "Discard"
 msgstr "Descartar"
 
-#: hcx/window.py:1030
-msgid "Save"
-msgstr "Guardar"
-
-#: hcx/window.py:1090
+#: hcx/window.py:1175
 msgid "Press Ctrl+S to keep your changes."
 msgstr "Pulsa Ctrl+S para conservar los cambios."
 
-#: hcx/window.py:1101
-msgid "All files"
-msgstr "Todos los archivos"
-
-#: hcx/window.py:1136
+#: hcx/window.py:1221
 msgid "Reading file…"
 msgstr "Leyendo el archivo…"
 
-#: hcx/window.py:1159 hcx/window.py:1190
+#: hcx/window.py:1244 hcx/window.py:1278
 msgid "No HyperCard stack was found in this file."
 msgstr "No se encontró ninguna pila de HyperCard en este archivo."
 
-#: hcx/window.py:1173
+#: hcx/window.py:1258
 msgid "HFS+ (Mac OS Extended) disk images are not supported yet. Copy the stack out of the image first (for example with hfsplus or a Mac)."
 msgstr "Las imágenes de disco HFS+ (Mac OS Plus) todavía no son compatibles. Copia antes la pila fuera de la imagen (por ejemplo con hfsplus o en un Mac)."
 
-#: hcx/window.py:1179 hcx/window.py:1176
+#: hcx/window.py:1264 hcx/window.py:1261
 msgid "Could not open the stack: %s"
 msgstr "No se pudo abrir la pila: %s"
 
-#: hcx/window.py:1200
-msgid "Choose a Stack"
-msgstr "Elige una pila"
+#: hcx/window.py:1275
+msgid "No HyperCard stack could be extracted from this archive. Some files in it could not be read (%s)."
+msgstr "No se pudo extraer ninguna pila de HyperCard de este archivo comprimido. Algunos archivos que contiene no se pudieron leer (%s)."
 
-#: hcx/window.py:1200
+#: hcx/window.py:1288
 msgid "This disk image contains several stacks."
 msgstr "Esta imagen de disco contiene varias pilas."
 
+#: hcx/window.py:1289
 msgid "This archive contains several stacks."
 msgstr "Este archivo comprimido contiene varias pilas."
 
-#: hcx/window.py:1242
+#: hcx/window.py:1290
+msgid "Choose a Stack"
+msgstr "Elige una pila"
+
+#: hcx/window.py:1332
 msgid "Importing…"
 msgstr "Importando…"
 
-#: hcx/window.py:1336
+#: hcx/window.py:1434
 msgid "Package exported to %s"
 msgstr "Paquete exportado a %s"
-
-msgid "No HyperCard stack could be extracted from this archive. Some files in it could not be read (%s)."
-msgstr "No se pudo extraer ninguna pila de HyperCard de este archivo comprimido. Algunos archivos que contiene no se pudieron leer (%s)."

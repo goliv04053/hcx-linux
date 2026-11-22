@@ -287,7 +287,7 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
             self.add_action(a)
             return a
 
-        add("open", lambda *a: self.choose_file())
+        add("open", lambda *a: self.choose_stack_file())
         add("close", lambda *a: self.close())
         add("first", lambda *a: self.go(0))
         add("prev", lambda *a: self.go(self.index - 1))
@@ -719,6 +719,21 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
 
     def list_select(self, prompt, lines, multiple=False):
         return scriptui.list_select(self, prompt, lines, multiple)
+
+    def choose_file(self, kind, prompt="", default="", patterns=None):
+        """File dialog for scripts: answer file, ask file and the file externals.
+        Starts in HCX's files folder and answers with a Mac-style path."""
+        from .hthost import files_root, local_to_mac
+        folder = os.path.join(files_root(), "HD")
+        r = scriptui.choose_file(self, "save" if kind == "save" else ("folder" if kind == "folder" else "file"),
+                                 prompt, default, folder, patterns)
+        self._script_t0 = None
+        return local_to_mac(r) if r else None
+
+    def ditl_dialog(self, spec, on_click=None):
+        r = scriptui.ditl_dialog(self, spec, on_click)
+        self._script_t0 = None
+        return r
 
     def popup_menu(self, items, h, v):
         return scriptui.popup_menu(self.view, items, h, v)
@@ -1165,7 +1180,7 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         self.toasts.add_toast(t)
 
     # -- opening ---------------------------------------------------------------------------------
-    def choose_file(self):
+    def choose_stack_file(self):
         dlg = Gtk.FileDialog(title=_("Open Stack…"))
         filters = Gio.ListStore.new(Gtk.FileFilter)
         f_all = Gtk.FileFilter(name=_("All files"))

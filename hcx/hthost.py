@@ -32,6 +32,22 @@ def mac_to_local(path):
     return os.path.join(files_root(), *parts)
 
 
+def local_to_mac(path):
+    """The inverse of mac_to_local: a file inside HCX's sandbox folder gets
+    a Mac path ("HD:Folder:File"); other files keep their Linux path."""
+    root = files_root()
+    try:
+        rel = os.path.relpath(path, root)
+    except ValueError:
+        return path
+    if rel.startswith("..") or os.path.isabs(rel):
+        return path
+    parts = [p for p in rel.split(os.sep) if p not in ("", ".")]
+    if not parts:
+        return path
+    return ":".join(parts)
+
+
 class HostMixin:
     def init_host(self):
         self.interp = ht.Interp(self)
@@ -497,8 +513,25 @@ class HostMixin:
     def ask(self, prompt, default="", password=False):
         return default
 
-    def choose_file(self, kind, prompt=""):
+    def choose_file(self, kind, prompt="", default="", patterns=None):
+        """A file chosen by the user (Mac-style path), or None if cancelled."""
         return None
+
+    def ditl_dialog(self, spec, on_click=None):
+        """Show a dialog made from DITL items (see macdialog). Without a
+        screen, answers as if the default button had been clicked."""
+        values = {}
+        for it in spec["items"]:
+            k = it["kind"]
+            if k == "edit":
+                values[it["n"]] = it.get("text", "")
+            elif k in ("check", "radio"):
+                values[it["n"]] = bool(it.get("checked"))
+            elif k == "list":
+                values[it["n"]] = list(it.get("selected", []))
+            elif k == "popup":
+                values[it["n"]] = int(it.get("selected_item") or 1)
+        return spec.get("default", 1), values
 
     def beep(self):
         pass

@@ -80,7 +80,9 @@ A versão 3 tem um **interpretador HyperTalk completo**, escrito do zero em Pyth
 Os **XCMDs/XFCNs** são código de máquina 68k do Mac e não rodam no Linux. Os mais usados foram reescritos em Python com o mesmo nome e os mesmos parâmetros, então os scripts chamam eles normalmente:
 
 - **Textos e recursos:** GetStr, Get1Str, SetStr, ResID, listOfResources (e os recursos CSTR, STR, TEXT e twtx da pilha)
-- **Menus e listas:** PopItUp e HPopUpMenu (menu suspenso no lugar do clique, com submenus), ListSelect, StripEm, CharInStr
+- **Menus e listas:** PopItUp e HPopUpMenu (menu suspenso no lugar do clique, com submenus), ListSelect, ShowList, StripEm, CharInStr
+- **Caixas de diálogo:** ShowDialog (os tipos 1 a 7), DialogDisplay e Dialoger. Eles desenham os diálogos a partir dos recursos DLOG/DITL que o autor criou no ResEdit, com botões, caixas de marcar, campos de texto, listas, ícones e figuras nos mesmos lugares que no Mac
+- **Escolher arquivos:** FileName, NewFileName e StandardFile, além de `answer file` e `ask file`, abrem a janela de arquivos do GNOME
 - **Janelas:** Picture (paletas e imagens PICT), TextXWindow (janelas de texto/ajuda), Movie (vídeo pelo GTK)
 - **Cores:** AddColor (botões, campos, retângulos e figuras coloridas, inclusive as cores já guardadas na pilha), colorizeHC, GetDepth
 - **Arquivos:** GetFilesInDir, GetFileSize, GetPathInfo, DeleteFile, CreateFolder, AppendDataToFile, AppendStyleDataToFile, GetFileIndexedEntry
@@ -89,7 +91,7 @@ Os **XCMDs/XFCNs** são código de máquina 68k do Mac e não rodam no Linux. Os
 
 Um XCMD que não está nessa lista é ignorado em silêncio, como se não tivesse feito nada.
 
-**Arquivos criados pelos scripts** (anotações, buscas salvas do H2G2 etc.) ficam numa pasta separada, `~/.local/share/hcx/files`. Os scripts só conseguem ler e gravar dentro dela. Assim, uma pilha antiga nunca apaga nem altera arquivos do seu sistema.
+**Arquivos criados pelos scripts** (anotações, buscas salvas do H2G2 etc.) ficam numa pasta separada, `~/.local/share/hcx/files`. Os scripts só conseguem ler e gravar dentro dela, a não ser num arquivo que você mesmo escolher na janela de arquivos. Assim, uma pilha antiga nunca apaga nem altera arquivos do seu sistema.
 
 Para ver cada passo do HyperTalk no terminal, rode com `HCX_TRACE=1 ./HCX-x86_64.AppImage`.
 

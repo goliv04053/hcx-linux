@@ -639,3 +639,355 @@ def movie(it, a):
         it.host.window_create(os.path.basename(p), "movie", {"file": p, "visible": True})
     else:
         it.result = "Couldn't open the movie “%s”." % name
+
+
+# -- file dialogs ------------------------------------------------------------------------
+
+_TYPE_PATTERNS = {
+    "TEXT": ("Text", ["*.txt", "*.text", "*.TXT"]),
+    "PICT": ("PICT", ["*.pict", "*.pct", "*.pic", "*.PICT"]),
+    "STAK": ("HyperCard", ["*.stak", "*.stack", "*.hcxs", "*.img", "*.sit", "*.hqx", "*.bin"]),
+    "SND ": ("Sound", ["*.snd", "*.aiff", "*.aif", "*.wav"]),
+}
+
+
+def _patterns(types):
+    for t in types:
+        t = str(t).strip().upper()
+        if t in _TYPE_PATTERNS:
+            return _TYPE_PATTERNS[t]
+        if t[:3] == "SND":
+            return _TYPE_PATTERNS["SND "]
+    return None
+
+
+@xfcn("FileName", "GetFileName", "SFGetFile", "GetFile", "FilePath", "FileOpen")
+def file_name(it, a):
+    """FileName(["TYPE"...]): the full path of a file the user picks, or empty."""
+    return it.host.choose_file("file", "", "", _patterns(a)) or ""
+
+
+@xfcn("NewFileName", "SFPutFile", "PutFile", "SaveFileName")
+def new_file_name(it, a):
+    """NewFileName(prompt, default name): the path for a new file, or empty."""
+    return it.host.choose_file("save", _arg(a, 0), _arg(a, 1)) or ""
+
+
+@xfcn("StandardFile")
+def standard_file(it, a):
+    """StandardFile("get|put|dir|apd|add[:button names]", ...) by Nigel Perry."""
+    fn = str(_arg(a, 0)).split(":", 1)[0].strip().lower()
+    if fn in ("put", "apd", "add"):
+        return it.host.choose_file("save", _arg(a, 2), _arg(a, 1)) or ""
+    if fn == "dir":
+        return it.host.choose_file("folder", _arg(a, 1)) or ""
+    return it.host.choose_file("file", "", "", _patterns(a[1:])) or ""
+
+
+# -- dialogs from DLOG/DITL resources (ShowDialog, DialogDisplay, Dialoger) and ShowList ----
+
+def _truth(v):
+    return str(v).strip().lower() in ("true", "1", "yes")
+
+
+def _first_user(spec):
+    from .macdialog import items_of
+    users = items_of(spec, "user")
+    return users[0] if users else None
+
+
+def _edits(spec, values):
+    from .macdialog import items_of
+    return [values.get(i["n"], "") for i in items_of(spec, "edit")]
+
+
+def _menu_items(text):
+    """ShowDialog type 4 menus: comma-separated items, "<B" style prefixes,
+    "(" for a disabled item, "(-" for a separator line."""
+    out = []
+    for x in str(text).split(","):
+        while x[:1] == "<" and len(x) >= 2:
+            x = x[2:]
+        if x.startswith("(-"):
+            out.append("—")
+            continue
+        out.append(x.lstrip("("))
+    return out
+
+
+@xcmd("ShowDialog")
+def show_dialog(it, a):
+    """ShowDialog type, DLOG id, … by Jay Hodgdon (types 1 to 7)."""
+    from . import macdialog as md
+    kind = int(ht.to_num(_arg(a, 0, "1"))) if ht.is_number(_arg(a, 0, "1")) else 1
+    if kind == 1:
+        spec = md.load(it, _arg(a, 1), [_arg(a, 2)])
+        if spec is None:
+            return ""
+        spec["outline_default"] = _truth(_arg(a, 3, "true"))
+        n, _v = it.host.ditl_dialog(spec)
+        return "" if n is None else str(n)
+    if kind in (2, 3, 4):
+        spec = md.load(it, _arg(a, 1), [_arg(a, 2), _arg(a, 3)])
+        if spec is None:
+            return ""
+        spec["cancel"] = 2
+        ed = md.item(spec, 3)
+        if ed is not None and ed["kind"] == "edit":
+            ed["text"] = str(_arg(a, 4))
+        checks = md.items_of(spec, "check")
+        radios = md.items_of(spec, "radio")
+        if kind == 2:
+            states = [_truth(x) for x in str(_arg(a, 5)).split(",")] if _arg(a, 5) != "" else []
+            for i, c in enumerate(checks):
+                c["checked"] = states[i] if i < len(states) else False
+        elif kind == 3:
+            want = int(ht.to_num(_arg(a, 5))) if ht.is_number(_arg(a, 5)) else (radios[0]["n"] if radios else 0)
+            for r in radios:
+                r["checked"] = r["n"] == want
+        else:
+            u = _first_user(spec)
+            if u is not None:
+                u["kind"] = "popup"
+                u["menu"] = _menu_items(_arg(a, 5))
+                u["selected_item"] = int(ht.to_num(_arg(a, 6))) if ht.is_number(_arg(a, 6)) else 1
+        n, values = it.host.ditl_dialog(spec)
+        if n is None or n == 2:
+            return ""
+        lines = []
+        if kind == 2 and checks:
+            lines.append(",".join("true" if values.get(c["n"]) else "false" for c in checks))
+        elif kind == 3:
+            on = [r["n"] for r in radios if values.get(r["n"])]
+            lines.append(str(on[0]) if on else "")
+        elif kind == 4:
+            u = md.items_of(spec, "popup")
+            lines.append(str(values.get(u[0]["n"], 1)) if u else "")
+        lines += _edits(spec, values)
+        return "\n".join(lines)
+    if kind == 7:
+        spec = md.load(it, _arg(a, 1), [_arg(a, 2)])
+        if spec is None:
+            return ""
+        spec["cancel"] = 2
+        spec["font"], spec["size"] = _arg(a, 3) or None, (int(ht.to_num(_arg(a, 4))) if ht.is_number(_arg(a, 4)) else 12) or 12
+        u = _first_user(spec)
+        if u is not None:
+            u["kind"] = "list"
+            u["lines"] = [x for x in str(_arg(a, 5)).split("\n")]
+            if u["lines"] and u["lines"][-1] == "":
+                u["lines"].pop()
+            sel = int(ht.to_num(_arg(a, 6))) if ht.is_number(_arg(a, 6)) else 0
+            u["selected"] = [sel] if sel > 0 else []
+            u["multiple"] = str(_arg(a, 7)).strip().lower() == "many"
+        n, values = it.host.ditl_dialog(spec)
+        if n is None:
+            n = 2
+        sel = values.get(u["n"], []) if u is not None else []
+        return "%d\n%s" % (n, ",".join(str(x) for x in sel))
+    if kind in (5, 6):
+        return _picture_dialog(it, a, kind)
+    return ""
+
+
+def _picture_dialog(it, a, kind):
+    """ShowDialog types 5 and 6: help screens made of PICTs shown in item 2."""
+    from . import macdialog as md
+    spec = md.load(it, _arg(a, 1))
+    if spec is None:
+        return ""
+    area = md.item(spec, 2)
+    if area is None:
+        return ""
+    area["kind"] = "user"
+    area["picture_area"] = True
+    spec["cancel"] = 1
+    if kind == 5:
+        first = int(ht.to_num(_arg(a, 2))) if ht.is_number(_arg(a, 2)) else 3
+        state = {"btn": first}
+
+        def show(ui):
+            ui.set_png(2, md.pict_png(it, 1000 + state["btn"]))
+            for b in md.items_of(spec, "button"):
+                if b["n"] >= 3:
+                    ui.set_sensitive(b["n"], b["n"] != state["btn"])
+
+        def click(n, ui):
+            if n >= 3:
+                state["btn"] = n
+                show(ui)
+                return "keep"
+            return None
+        spec["on_show"] = show
+        it.host.ditl_dialog(spec, click)
+        return ""
+    base = int(ht.to_num(_arg(a, 2))) if ht.is_number(_arg(a, 2)) else 0
+    total = max(1, int(ht.to_num(_arg(a, 3))) if ht.is_number(_arg(a, 3)) else 1)
+    state = {"k": max(1, min(total, int(ht.to_num(_arg(a, 4))) if ht.is_number(_arg(a, 4)) else 1))}
+    cycle = _truth(_arg(a, 5))
+
+    def show(ui):
+        k = state["k"]
+        r = md.find(it, ("PICT",), base + k - 1)
+        ui.set_png(2, md.pict_png(it, base + k - 1))
+        ui.set_text(5, r[2] if r is not None else "")
+        ui.set_text(6, "Page %d of %d" % (k, total))
+        if not cycle:
+            ui.set_sensitive(3, k > 1)
+            ui.set_sensitive(4, k < total)
+
+    def click(n, ui):
+        if n in (3, 4):
+            k = state["k"] + (1 if n == 4 else -1)
+            state["k"] = (k - 1) % total + 1 if cycle else max(1, min(total, k))
+            show(ui)
+            return "keep"
+        return None
+    spec["on_show"] = show
+    n, _v = it.host.ditl_dialog(spec, click)
+    return "true" if n == 7 else "false"
+
+
+_DD_STATE = {}
+
+
+@xfcn("DialogDisplay")
+def dialog_display(it, a):
+    """DialogDisplay(command, …) by Software Perspectives: setText,
+    setButtonName, setButtonDefault, setTextFont/Size/Face, showDialog, getVersion."""
+    from . import macdialog as md
+    st = _DD_STATE.setdefault(id(it.host), {"texts": [], "buttons": [], "default": True,
+                                            "font": None, "size": None})
+    cmd = str(_arg(a, 0)).strip()
+    low = cmd.lower()
+    if low == "settext":
+        st["texts"] = list(a[1:5])
+    elif low == "setbuttonname":
+        st["buttons"] = list(a[1:4])
+    elif low == "setbuttondefault":
+        st["default"] = _truth(_arg(a, 1))
+    elif low == "settextfont":
+        st["font"] = str(_arg(a, 1)) or None
+    elif low == "settextsize":
+        st["size"] = int(ht.to_num(_arg(a, 1))) if ht.is_number(_arg(a, 1)) else None
+    elif low == "settextface":
+        pass
+    elif low == "getversion":
+        return "DialogDisplay 2.0 (HCX)"
+    elif low == "showdialog" or ht.is_number(cmd):
+        rid = _arg(a, 1) if low == "showdialog" else cmd
+        texts = st["texts"] if low == "showdialog" else list(a[1:5])
+        spec = md.load(it, rid, texts)
+        if spec is None:
+            return "Error: dialog %s not found" % rid
+        for k, name in enumerate(st["buttons"]):
+            b = md.item(spec, k + 1)
+            if b is not None and b["kind"] == "button" and str(name) != "":
+                b["text"] = str(name)
+        spec["outline_default"] = st["default"]
+        spec["font"], spec["size"] = st["font"], st["size"]
+        n, _v = it.host.ditl_dialog(spec)
+        return "" if n is None else str(n)
+    return ""
+
+
+@xfcn("Dialoger")
+def dialoger(it, a):
+    """Dialoger("!DLOG name" & return & options, params…) by Leonard Buck.
+    Only the use found in stacks is supported: text parameters fill ^0-^3
+    and a "userList font,size,1|AnySelection" & return & lines parameter puts
+    a list in the first user item. The result has one line per DITL item:
+    1 for the button clicked, the selected line numbers of a list, the text
+    of edit fields, 1 or 0 for check boxes and radio buttons."""
+    from . import macdialog as md
+    head = str(_arg(a, 0)).split("\n")
+    name = head[0].strip()
+    params, lists = [], []
+    for p in a[1:]:
+        s = str(p)
+        if s.lower().startswith("userlist"):
+            lines = s.split("\n")
+            opts = lines[0].split(None, 1)[1] if " " in lines[0] else ""
+            o = [x.strip() for x in opts.split(",")]
+            lists.append({"lines": [x for x in lines[1:]], "font": o[0] if o and o[0] else None,
+                          "size": int(o[1]) if len(o) > 1 and o[1].isdigit() else None,
+                          "multiple": len(o) > 2 and o[2].lower() != "1"})
+        else:
+            params.append(s)
+    spec = md.load(it, name, params)
+    if spec is None and name.startswith("!"):
+        spec = md.load(it, name[1:], params)
+    if spec is None:
+        return "Error: no dialog “%s”" % name
+    spec["cancel"] = 2
+    users = md.items_of(spec, "user")
+    for u, l in zip(users, lists):
+        u.update(kind="list", lines=l["lines"], multiple=l["multiple"], selected=[])
+        if l["font"]:
+            u["font"] = l["font"]
+        if l["size"]:
+            u["size"] = l["size"]
+    n, values = it.host.ditl_dialog(spec)
+    out = []
+    for i in spec["items"]:
+        k = i["kind"]
+        if k == "button":
+            out.append("1" if i["n"] == n else "")
+        elif k == "list":
+            out.append(",".join(str(x) for x in values.get(i["n"], [])))
+        elif k == "edit":
+            out.append(str(values.get(i["n"], "")).replace("\n", " "))
+        elif k in ("check", "radio"):
+            out.append("1" if values.get(i["n"]) else "0")
+        else:
+            out.append("")
+    return "\n".join(out)
+
+
+@xfcn("ShowList")
+def show_list(it, a):
+    """ShowList(list, prompt, multiple, ?, "OK,Cancel^", selected line [, h, v])
+    from Apple's externals. Answers the button name on line 1 and the chosen
+    line numbers on line 2 (empty when the button ends with ^, the cancel button)."""
+    items = str(_arg(a, 0))
+    prompt = _arg(a, 1)
+    delim = "\n"
+    rest = list(a[2:])
+    if ht.is_number(prompt) and len(a) >= 3:
+        delim = chr(int(ht.to_num(prompt)))
+        prompt, rest = _arg(a, 2), list(a[3:])
+    multiple = _truth(rest[0]) if rest else False
+    buttons = str(rest[2]) if len(rest) > 2 and str(rest[2]) else "OK,Cancel^"
+    sel = int(ht.to_num(rest[3])) if len(rest) > 3 and ht.is_number(rest[3]) else 0
+    lines = items.split(delim)
+    if lines and lines[-1] == "":
+        lines.pop()
+    names = [b for b in buttons.split(",") if b != ""][:4]
+    width = 300
+    list_h = min(16 * max(4, len(lines)), 200)
+    prompt_h = 16 * max(1, min(6, len(str(prompt)) // 40 + 1 + str(prompt).count("\n")))
+    top = 8 + prompt_h + 6
+    bottom = top + list_h + 10
+    spec = {"title": "", "proc": 1, "width": width, "height": bottom + 30, "default": 1, "items": [], "cancel": None}
+    x = width - 8
+    for k, b in reversed(list(enumerate(names))):
+        bw = max(60, 8 * len(b.rstrip("^")) + 16)
+        spec["items"].append({"n": k + 1, "kind": "button", "text": b.rstrip("^"), "enabled": True,
+                              "rect": (x - bw, bottom, x, bottom + 20)})
+        if b.endswith("^"):
+            spec["cancel"] = k + 1
+        x -= bw + 10
+    spec["items"].sort(key=lambda i: i["n"])
+    nb = len(names)
+    spec["items"].append({"n": nb + 1, "kind": "static", "text": str(prompt), "enabled": False,
+                          "rect": (8, 8, width - 8, 8 + prompt_h)})
+    spec["items"].append({"n": nb + 2, "kind": "list", "lines": lines, "multiple": multiple,
+                          "selected": [sel] if sel > 0 else [], "enabled": True,
+                          "rect": (8, top, width - 8, top + list_h)})
+    n, values = it.host.ditl_dialog(spec)
+    if n is None:
+        n = spec["cancel"] or len(names)
+    name = names[n - 1].rstrip("^") if 0 < n <= len(names) else ""
+    if spec["cancel"] == n:
+        return name + "\n"
+    return name + "\n" + ",".join(str(x) for x in values.get(nb + 2, []))
