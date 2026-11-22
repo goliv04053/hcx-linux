@@ -23,6 +23,7 @@ Pull requests and issues are welcome in English too.*
 
 - [x] Caixas de diálogo feitas com recursos DLOG/DITL (ShowDialog, DialogDisplay, Dialoger), ShowList, e a janela de arquivos para `answer file`, `ask file`, FileName, NewFileName e StandardFile
 - [x] Arquivos Compact Pro (.cpt) e autoextraíveis (.sea), e os métodos 5 (LZAH) e 8 (MW) do StuffIt. Testado com os 632 arquivos da seção HyperCard do arquivo de Mac da Universidade de Michigan: todos os que têm pilhas abrem (869 pilhas)
+- [x] Arquivos do DiskDoubler (inclusive os .sea) e imagens de disco dentro de arquivos compactados, como os Expanded Books da Voyager
 - [x] Fala: `speak`, `the speech`, `the voices` e os XCMDs de fala (Say, MacinTalkSay, Vocalise, SpeakText…) usando o speech-dispatcher do Linux ou o eSpeak NG
 - [ ] QuickTime: QTPict e os XCMDs de filme
 - [x] Fontes do Mac tiradas de um disco do usuário (System, pasta Fonts): os tamanhos em bitmap viram fontes com os mesmos pixels e larguras, e as TrueType são usadas nos outros tamanhos. A pilha Home do disco passa a ser a do `go home`

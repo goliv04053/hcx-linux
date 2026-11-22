@@ -386,9 +386,10 @@ class OpenResult:
 
 
 def _is_archive_data(data):
-    """True for the data of a StuffIt or Compact Pro archive."""
-    from . import stuffit, compactpro
-    return bool(data) and (stuffit.is_stuffit(data) or compactpro.is_compact_pro(data))
+    """True for the data of a StuffIt, Compact Pro or DiskDoubler archive."""
+    from . import stuffit, compactpro, diskdoubler
+    return bool(data) and (stuffit.is_stuffit(data) or compactpro.is_compact_pro(data)
+                           or diskdoubler.is_diskdoubler(data))
 
 
 def _is_archive(mf):
@@ -396,11 +397,29 @@ def _is_archive(mf):
     return _is_archive_data(mf.data) or (not mf.data and mf.type == b"SIT!" and stuffit.is_stuffit(mf.rsrc))
 
 
-def _extract_archive(data):
-    from . import stuffit, compactpro
+def _extract_archive(data, name="file"):
+    from . import stuffit, compactpro, diskdoubler
     if stuffit.is_stuffit(data):
         return stuffit.extract(data)
+    if diskdoubler.is_diskdoubler(data):
+        return diskdoubler.extract(data, name)
     return compactpro.extract(data)
+
+
+def _disk_image_volumes(mf):
+    """The HFS volumes of a disk image file found inside an archive
+    (a DiskCopy or raw image of a floppy or a hard disk), or []."""
+    d = mf.data
+    if len(d) < 400 * 1024:
+        return []
+    if not (mf.type in (b"dImg", b"rohd", b"hdrv", b"devi") or d[1024:1026] == b"BD"
+            or (len(d) > 84 + 1026 and d[82:84] == b"\x01\x00" and d[84 + 1024:84 + 1026] == b"BD")
+            or d[:2] == b"ER"):
+        return []
+    try:
+        return find_hfs_volumes(d)
+    except Exception:  # noqa: BLE001
+        return []
 
 
 _ARCHIVE_EXTS = (".sit", ".cpt", ".sea")
@@ -410,14 +429,23 @@ def expand_archives(files, depth=0, errors=None):
     """Replace the StuffIt and Compact Pro archives among files by the files
     inside them (archives inside archives too, a few levels deep). Entries
     that could not be extracted are added to errors as (path, reason)."""
-    from . import stuffit, compactpro
+    from . import stuffit, compactpro, diskdoubler
     out = []
     for mf in files:
+        vols = _disk_image_volumes(mf) if depth < 4 else []
+        if vols:
+            prefix = mf.path or mf.name
+            for v in vols:
+                for f in v.files:
+                    f.path = prefix + ":" + (f.path or f.name)
+                out.extend(expand_archives(v.files, depth + 1, errors))
+            continue
         if depth < 4 and _is_archive_data(mf.data):
             prefix = mf.path.rsplit(".", 1)[0] if mf.path.lower().endswith(_ARCHIVE_EXTS) else mf.path
             try:
-                inner, errs = _extract_archive(mf.data)
-            except (stuffit.StuffItError, compactpro.CompactProError, IndexError, struct.error) as e:
+                inner, errs = _extract_archive(mf.data, mf.name)
+            except (stuffit.StuffItError, compactpro.CompactProError, diskdoubler.DiskDoublerError,
+                    IndexError, struct.error) as e:
                 if errors is not None:
                     errors.append((prefix or mf.name, str(e)))
                 out.append(mf)

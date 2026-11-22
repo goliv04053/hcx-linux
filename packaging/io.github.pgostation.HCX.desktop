@@ -12,6 +12,6 @@ Exec=hcx %F
 Icon=io.github.pgostation.HCX
 Terminal=false
 Categories=Utility;
-Keywords=HyperCard;Macintosh;stack;Mac;StuffIt;Compact Pro;
+Keywords=HyperCard;Macintosh;stack;Mac;StuffIt;Compact Pro;DiskDoubler;
 MimeType=application/x-stuffit;application/mac-binhex40;application/x-macbinary;
 StartupNotify=true

@@ -51,7 +51,7 @@ As traduções são arquivos `.po` comuns, na pasta `hcx/locale/`. Qualquer pess
 
 - Pilhas HyperCard 1.x e 2.x, inclusive as protegidas com "acesso privado"
 - Pilhas em MacBinary (.bin), BinHex (.hqx), AppleSingle/AppleDouble (arquivos `._`) e com o resource fork ao lado (`.rsrc`)
-- Arquivos StuffIt (.sit, .sit.hqx, StuffIt 1.5 a 5) e Compact Pro (.cpt, .cpt.hqx), inclusive os autoextraíveis (.sea), sem precisar descompactar antes: o HCX lista as pilhas que estão dentro
+- Arquivos StuffIt (.sit, .sit.hqx, StuffIt 1.5 a 5), Compact Pro (.cpt, .cpt.hqx) e DiskDoubler, inclusive os autoextraíveis (.sea), sem precisar descompactar antes: o HCX lista as pilhas que estão dentro. Imagens de disco que vêm dentro de um desses arquivos também são abertas
 - Imagens de disco HFS (.img, .dsk, .image, DiskCopy 4.2, com mapa de partições Apple). Se a imagem tiver várias pilhas (como a do H2G2), aparece uma lista para escolher.
 - Também dá para arrastar o arquivo para dentro da janela.
 
