@@ -334,9 +334,14 @@ class Machine:
                 self.set_reg(PC, pc + 2)
                 if trap is None:
                     raise Unimplemented("trap %04X" % op)
-                trap(self, op)
-                if op & 0x0800 and op & 0x0400:     # toolbox trap with auto-pop
-                    self.set_reg(PC, self.pop32())
+                if op & 0x0800 and op & 0x0400:
+                    # Toolbox trap with auto-pop: glue pushed its own return
+                    # address on top of the arguments; the routine returns there
+                    ret = self.pop32()
+                    trap(self, op)
+                    self.set_reg(PC, ret)
+                else:
+                    trap(self, op)
                 continue
             if stop == CALLBACK_STUB:
                 ret = self.pop32()

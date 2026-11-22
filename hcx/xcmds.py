@@ -342,6 +342,91 @@ def leaf_name(it, a):
     return str(_arg(a, 0)).rsplit(":", 1)[-1]
 
 
+def _ascii_upper(text):
+    return "".join(c.upper() if "a" <= c <= "z" else c for c in text)
+
+
+def _word_char(c):
+    """A letter or a digit, as the Script Manager's CharType sees it."""
+    return c.isalpha() or c.isdigit()
+
+
+@xfcn("FullFind")
+def full_find(it, a):
+    """FullFind(container, pattern[, exactly[, all[, case sens.[, beginning[,
+    start[, items]]]]]]) by Frédéric Rinaldi. Each find is "char in
+    text,line in text,char in line,item in line", one per line. "exactly"
+    (the default) takes whole words only; "beginning" (version 2) words
+    that start with the pattern; start is how many characters to skip;
+    items a list of item numbers the find must start in."""
+    a = [str(x) for x in a]
+    if len(a) < 2:
+        return "Error : Missing parameter(s)"
+    code = _ext_code(it, "FullFind")
+    v2 = b"<beginning>" in code
+    v11 = b"Version 1.1," in code
+    flags = [True, False, False, False]
+    nflags = 4 if v2 else 3
+    for n in range(nflags):
+        if len(a) > n + 2:
+            v = _bool_param(a[n + 2])
+            if v is None:
+                return "Error : Param %d must be true|false" % (n + 3)
+            flags[n] = v
+    exactly, every, case, beginning = flags
+    rest = a[2 + nflags:]
+    skip = 0
+    if rest:
+        s = rest[0]
+        if v2:
+            if not (s.lstrip("-").isdigit() and s.count("-") <= 1 and s[:1] != "+"):
+                return "Error : Param 7 must be an integer"
+            skip = int(s)
+            if skip < 0:
+                return ""
+        else:
+            if not s.isdigit():
+                return "Error : Param 6 must be a positive integer"
+            skip = int(s)
+    items = None
+    if len(rest) > 1:
+        def num(x):
+            if v11:
+                d = len(x) - len(x.lstrip("0123456789"))
+                return int(x[:d]) if d else 0
+            return int(x) if x.isdigit() else 0
+        if not (v11 and rest[1] == ""):
+            items = {num(x) for x in rest[1].split(",")}
+    delim = it.props.get("itemdelimiter", ",") if not code or b"the itemDelimiter" in code else ","
+    text, pat = a[0].replace("\r", "\n"), a[1].replace("\r", "\n")
+    if exactly and pat[-1:] in ("\n", delim):
+        return "Error : Separator char not allowed at the end of pattern"
+    if not text or not pat:
+        return ""
+    if v11:
+        def boundary(c):
+            return c in (" ", "\n", delim)
+    else:
+        def boundary(c):
+            return not _word_char(c)
+    hay, needle = (text, pat) if case else (_ascii_upper(text), _ascii_upper(pat))
+    found = []
+    i = hay.find(needle, skip)
+    while i >= 0:
+        end = i + len(needle)
+        ok = not (exactly or beginning) or i == 0 or boundary(text[i - 1])
+        if ok and exactly:
+            ok = end >= len(text) or boundary(text[end])
+        line_start = text.rfind("\n", 0, i) + 1
+        item = text.count(delim, line_start, i) + 1
+        if ok and (items is None or item in items):
+            found.append("%d,%d,%d,%d" % (i + 1, text.count("\n", 0, i) + 1, i - line_start + 1, item))
+            if not every:
+                break
+        i = hay.find(needle, i + 1)
+    return "\n".join(found)
+
+
 @xfcn("Substitute")
 def substitute(it, a):
     """Substitute(characters, replacement, text) by Eric Celeste: each of

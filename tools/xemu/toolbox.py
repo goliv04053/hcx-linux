@@ -1460,6 +1460,103 @@ def _debug_str(tb, op):
     tb.log("XCMD DebugStr: " + s)
 
 
+# -- International Utilities and Script Manager --------------------------------------------------------
+
+def _primary(b):
+    """A Mac Roman string's primary sort key: case and accents ignored."""
+    import unicodedata
+    t = b.decode("mac_roman", "replace")
+    return "".join(c for c in unicodedata.normalize("NFD", t) if not unicodedata.combining(c)).upper()
+
+
+def _mag_compare(a, b):
+    pa, pb = _primary(a), _primary(b)
+    if pa != pb:
+        return -1 if pa < pb else 1
+    return 0 if a == b else (-1 if a < b else 1)
+
+
+@tb_trap(0xA9ED)
+def _pack6(tb, op):
+    m = tb.m
+    sel = m.pop16()
+    if sel in (10, 12):     # IUMagString / IUMagIDString(aPtr, bPtr, aLen, bLen)
+        blen, alen = m.pops16(), m.pops16()
+        bp, ap = m.pop32(), m.pop32()
+        a, b = m.rbytes(ap, max(alen, 0)), m.rbytes(bp, max(blen, 0))
+        tb.ret16((0 if a == b else 1) if sel == 12 else _mag_compare(a, b) & 0xFFFF)
+    else:
+        raise Unimplemented("Pack6 selector %d" % sel)
+
+
+def _char_type(c):
+    ch = bytes([c]).decode("mac_roman")
+    if ch.isalpha():
+        return (1 if c < 0x80 else 7) | (0x4000 if ch.isupper() else 0)
+    if ch.isdigit():
+        return 0x0100                   # smPunctNumber
+    if ch.isspace() or c < 0x20:
+        return 0x0300                   # smPunctBlank
+    return 0x0200 if c >= 0x80 else 0   # smPunctSymbol / smPunctNormal
+
+
+def _is_word_char(c):
+    t = _char_type(c)
+    return t & 0x0F != 0 or t == 0x0100
+
+
+@tb_trap(0xA8B5)
+def _script_util(tb, op):
+    """ScriptUtil for the Roman script only. The selector says how many
+    bytes of arguments and of result there are; with bit 30 set (the System
+    7 calls such as FindWordBreaks) a script code comes first."""
+    m = tb.m
+    sel = m.pop32()
+    routine, nargs, nres = sel & 0xFFFF, (sel >> 16) & 0xFF, (sel >> 24) & 0x0F
+    if sel & 0x40000000:        # the System 7 forms take a script code on top
+        m.sp += 2
+    args = m.rbytes(m.sp, nargs)
+    m.sp += nargs
+
+    def arg16(off):
+        v = int.from_bytes(args[off:off + 2], "big")
+        return v - 0x10000 if v & 0x8000 else v
+
+    def arg32(off):
+        return int.from_bytes(args[off:off + 4], "big")
+
+    res = 0
+    if routine in (0, 2, 4, 6, 14, 16, 10):    # FontScript, IntlScript, KybdScript, Font2Script,
+        res = 0                                # SetScript, CharByte, SetEnvirons: Roman, one byte
+    elif routine == 8:                         # GetEnvirons(verb)
+        res = {0: 0x0710, 4: 1}.get(arg16(0), 0)
+    elif routine == 12:                        # GetScript(script, verb)
+        res = 0
+    elif routine == 18:                        # CharType(textBuf, textOffset)
+        res = _char_type(m.rbytes(arg32(2) + arg16(0), 1)[0])
+    elif routine == 26:                        # FindWord(text, length, offset, leadingEdge, breaks, offsets)
+        offsets, text, n = arg32(0), arg32(14), arg16(12)
+        off, lead = arg16(10), args[8] != 0
+        buf = m.rbytes(text, max(n, 0))
+        i = off if lead else off - 1
+        i = min(max(i, 0), max(n - 1, 0))
+        a = b = i
+        if n and _is_word_char(buf[i]):
+            while a > 0 and _is_word_char(buf[a - 1]):
+                a -= 1
+            while b < n and _is_word_char(buf[b]):
+                b += 1
+        else:
+            b = min(i + 1, n)
+        m.wbytes(offsets, a.to_bytes(2, "big") + b.to_bytes(2, "big") + bytes(8))
+    else:
+        raise Unimplemented("ScriptUtil selector %08X" % sel)
+    if nres == 4:
+        m.w32(m.sp, res & 0xFFFFFFFF)
+    elif nres == 2:
+        m.w16(m.sp, res & 0xFFFF)
+
+
 # -- File Manager -----------------------------------------------------------------------------------
 
 from . import filemgr  # noqa: E402
