@@ -165,6 +165,10 @@ class XCmdRunner:
     def arg(self, i):
         return self.m.r32(self.blk + 80 + 4 * i)
 
+    def s32(self, i):
+        v = self.arg(i)
+        return v - (1 << 32) if v & 0x80000000 else v
+
     def out(self, i, v):
         self.m.w32(self.blk + 112 + 4 * i, v & 0xFFFFFFFF)
 
@@ -346,8 +350,9 @@ def _set_global(r):
 
 
 def _field_expr(r, which, v):
-    # inArgs[1]: cardFieldFlag (a Boolean in the high byte)
-    layer = "card" if r.m.r8(r.blk + 80) else "background"
+    # inArgs[0]: cardFieldFlag, a Boolean that Pascal glue stores in the
+    # high byte and C glue in the low byte
+    layer = "card" if r.arg(0) & 0xFF0000FF else "background"
     return "%s field %s" % (layer, v) if which != "id" else "%s field id %s" % (layer, v)
 
 
@@ -494,6 +499,93 @@ def _str_to_rect(r):
     p = r.arg(1)
     for i, v in enumerate((t, l, b, rt)):
         r.m.w16(p + 2 * i, v)
+
+
+def _field_for(r, card, fid, num, name):
+    kind = "card" if card else "bkgnd"
+    if fid:
+        src = "%s field id %d" % (kind, fid)
+    elif num:
+        src = "%s field %d" % (kind, num)
+    else:
+        src = '%s field "%s"' % (kind, name.replace('"', ""))
+    try:
+        ref = ht.parse_ref(r.it, src)
+    except ht.HTError:
+        return None
+    return ref if isinstance(ref, ht.Obj) and ref.t == "part" else None
+
+
+@_cb(GET_FIELD_TE)
+def _get_field_te(r):
+    """A styled TextEdit record with a copy of the field's text and styles."""
+    from hcx import xcmds
+    m, heap = r.m, r.m.heap
+    ref = _field_for(r, bool(r.arg(0) & 0xFF0000FF), r.s32(1), r.s32(2),
+                     r.pas(r.arg(3)) if r.arg(3) else "")
+    r.out(0, 0)
+    if ref is None:
+        return
+    c = r.it.host.content_of(ref.a, ref.b, ref.c, card=ref.d)
+    text = to_mac(c.text if c is not None else "")
+    rec = xcmds._style_record(r.it, ref)
+    nruns = int.from_bytes(rec[:2], "big")
+    runs = rec[2:2 + 4 * nruns]
+    o = 2 + 4 * nruns
+    nstyles = int.from_bytes(rec[o:o + 2], "big")
+    table = rec[o + 2:o + 2 + 18 * nstyles]
+    p = ref.b
+    hte = heap.new_handle(104, clear=True)
+    htext = heap.new_handle(len(text), data=text)
+    styletab = heap.new_handle(max(len(table), 18), data=table or bytes(18))
+    lhtab = heap.new_handle(4 * max(nstyles, 1), clear=True)
+    nullst = heap.new_handle(8, clear=True)
+    hst = heap.new_handle(20 + len(runs), clear=True)
+    sp = heap.deref(hst)
+    m.w16(sp, nruns - 1)
+    m.w16(sp + 2, nstyles)
+    m.w32(sp + 4, styletab)
+    m.w32(sp + 8, lhtab)
+    m.w32(sp + 16, nullst)
+    m.wbytes(sp + 20, runs)
+    t = heap.deref(hte)
+    rect = (p.top, p.left, p.bottom, p.right)
+    for base in (0, 8):
+        for i, v in enumerate(rect):
+            m.w16(t + base + 2 * i, v)
+    m.w16(t + 24, 0xFFFF)               # lineHeight, fontAscent: -1 = styled
+    m.w16(t + 26, 0xFFFF)
+    m.w16(t + 60, len(text))            # teLength
+    m.w32(t + 62, htext)                # hText
+    m.w8(t + 72, 0)                     # crOnly
+    m.w32(t + 74, hst)                  # txFont+txFace: the style handle
+    m.w16(t + 78, 1)                    # txMode
+    m.w16(t + 80, 0xFFFF)               # txSize -1: styled
+    m.w32(t + 82, m.r32(m.r32(m.a(5))))  # inPort
+    r.out(0, hte)
+
+
+@_cb(SET_FIELD_TE)
+def _set_field_te(r):
+    """The field gets the text and styles of a TextEdit record."""
+    from hcx import xcmds
+    m, heap = r.m, r.m.heap
+    ref = _field_for(r, bool(r.arg(0) & 0xFF0000FF), r.s32(1), r.s32(2),
+                     r.pas(r.arg(3)) if r.arg(3) else "")
+    hte = r.arg(4)
+    if ref is None or not heap.is_handle(hte):
+        m.w16(r.blk + 78, 1)
+        return
+    t = heap.deref(hte)
+    n = m.r16(t + 60)
+    text = from_mac(m.rbytes(heap.deref(m.r32(t + 62)), n))
+    r.it.put_into(ref, text)
+    if m.s16(t + 80) == -1:
+        sp = heap.deref(m.r32(t + 74))
+        nruns, nstyles = m.r16(sp), m.r16(sp + 2)
+        rec = ((nruns + 1).to_bytes(2, "big") + m.rbytes(sp + 20, 4 * (nruns + 1)) +
+               nstyles.to_bytes(2, "big") + m.rbytes(heap.deref(m.r32(sp + 4)), 18 * nstyles))
+        xcmds._apply_style_record(r.it, ref, rec)
 
 
 @_cb(SHOW_HC_ALERT)

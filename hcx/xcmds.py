@@ -455,7 +455,7 @@ def _append_entry(path, data):
 
 def _field_ref(it, layer, num):
     kind = "card" if str(layer).strip().lower().startswith("c") else "bkgnd"
-    if not ht.is_number(num):
+    if not ht.is_number(num):      # the originals take only a number
         return None
     try:
         ref = ht.parse_ref(it, "%s field %d" % (kind, int(ht.to_num(num))))
@@ -618,6 +618,19 @@ def apply_file_entry(it, a):
 
 @xcmd("SelectionToClip", "CopyToClip", "ToClip")
 def selection_to_clip(it, a):
+    """SelectionToClip field number, card field?, first char, last char
+    (Voyager's Library: copies that part of the field), or text, or nothing
+    for the current selection."""
+    if len(a) >= 4 and all(ht.is_number(_arg(a, i)) for i in (0, 2, 3)):
+        ref = _field(it, _arg(a, 0), "c" if ht.to_bool(_arg(a, 1, "false") or "false") else "b")
+        if ref is None:
+            it.result = "Incorrect number of parameters"
+            return
+        c = it.host.content_of(ref.a, ref.b, ref.c, card=ref.d)
+        text = c.text if c is not None else ""
+        s0, s1 = int(ht.to_num(_arg(a, 2))), int(ht.to_num(_arg(a, 3)))
+        it.host.set_clipboard(text[max(0, s0 - 1):max(0, s1)])
+        return
     text = str(a[0]) if a else it.host.selection_text()
     it.host.set_clipboard(text)
 

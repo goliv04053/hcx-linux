@@ -1220,6 +1220,207 @@ def _equal_pt(tb, op):
     tb.ret_bool(a == b)
 
 
+# -- TextEdit (the records that HyperCard's GetFieldTE makes) -------------------------------------
+
+def _te_style(tb, hte):
+    m = tb.m
+    t = tb.heap.deref(hte)
+    return m.r32(t + 74) if m.s16(t + 80) == -1 else 0
+
+
+def _te_read(tb, hte):
+    """Per-character styles of a styled TE record: a list of 12-byte
+    TextStyle-like tuples (font, face, size, color bytes) plus the 18-byte
+    STElement heights to keep."""
+    m, heap = tb.m, tb.heap
+    t = heap.deref(hte)
+    n = m.r16(t + 60)
+    hs = _te_style(tb, hte)
+    if not hs:
+        return n, [(m.s16(t + 74), m.r8(t + 76), m.s16(t + 80), bytes(6), 0, 0)] * n
+    sp = heap.deref(hs)
+    nruns, nstyles = m.r16(sp), m.r16(sp + 2)
+    tab = heap.deref(m.r32(sp + 4))
+    styles = []
+    for k in range(nstyles):
+        e = tab + 18 * k
+        styles.append((m.s16(e + 6), m.r8(e + 8), m.s16(e + 10), m.rbytes(e + 12, 6), m.s16(e + 2), m.s16(e + 4)))
+    out = [styles[0] if styles else (0, 0, 12, bytes(6), 16, 12)] * n
+    for i in range(nruns):
+        start, k = m.r16(sp + 20 + 4 * i), m.r16(sp + 20 + 4 * i + 4 - 2)
+        end = m.r16(sp + 20 + 4 * (i + 1))
+        if k < len(styles):
+            for c in range(start, min(end, n)):
+                out[c] = styles[k]
+    return n, out
+
+
+def _te_write(tb, hte, n, chars):
+    m, heap = tb.m, tb.heap
+    hs = _te_style(tb, hte)
+    if not hs:
+        return
+    styles, index, runs = [], {}, []
+    prev = None
+    for i, st in enumerate(chars or [None]):
+        if st is None or st == prev:
+            continue
+        prev = st
+        key = st[:4]
+        if key not in index:
+            index[key] = len(styles)
+            styles.append([0, st])
+        styles[index[key]][0] += 1
+        runs.append((i, index[key]))
+    if not runs:
+        runs = [(0, 0)]
+        styles = [[1, (0, 0, 12, bytes(6), 16, 12)]]
+    heap.set_size(hs, 20 + 4 * (len(runs) + 1))
+    sp = heap.deref(hs)
+    m.w16(sp, len(runs))
+    m.w16(sp + 2, len(styles))
+    for i, (start, k) in enumerate(runs + [(n + 1, 0)]):
+        m.w16(sp + 20 + 4 * i, start)
+        m.w16(sp + 22 + 4 * i, k)
+    th = m.r32(sp + 4)
+    heap.set_size(th, 18 * len(styles))
+    tab = heap.deref(th)
+    for k, (count, (font, face, size, color, height, ascent)) in enumerate(styles):
+        e = tab + 18 * k
+        m.w16(e, count)
+        m.w16(e + 2, height or size + max(2, size // 4) + 1)
+        m.w16(e + 4, ascent or size)
+        m.w16(e + 6, font)
+        m.w8(e + 8, face)
+        m.w8(e + 9, 0)
+        m.w16(e + 10, size)
+        m.wbytes(e + 12, color)
+
+
+@tb_trap(0xA83D)
+def _te_dispatch(tb, op):
+    m = tb.m
+    sel = m.pop16()
+    if sel == 1:                # TESetStyle(mode, newStyle, redraw, hTE)
+        hte = m.pop32()
+        m.pop16()
+        p = m.pop32()
+        mode = m.pop16()
+        font, face, size, color = m.s16(p), m.r8(p + 2), m.s16(p + 4), m.rbytes(p + 6, 6)
+        t = tb.heap.deref(hte)
+        start, end = m.r16(t + 32), m.r16(t + 34)
+        n, chars = _te_read(tb, hte)
+        for i in range(start, min(end, n)):
+            f0, fa0, s0, c0, h0, a0 = chars[i]
+            if mode & 1:
+                f0 = font
+            if mode & 2:
+                fa0 = (fa0 ^ face) if mode & 32 and face and fa0 & face == face else (fa0 | face if face and mode & 32 else face)
+            if mode & 16:
+                s0 = s0 + size
+            elif mode & 4:
+                s0 = size
+            if mode & 8:
+                c0 = color
+            chars[i] = (f0, fa0, s0, c0, 0 if (mode & 20) else h0, 0 if (mode & 20) else a0)
+        _te_write(tb, hte, n, chars)
+        return
+    if sel == 3:                # TEGetStyle(offset, VAR theStyle, VAR lineHeight, VAR fontAscent, hTE)
+        hte, pa, ph, ps = m.pop32(), m.pop32(), m.pop32(), m.pop32()
+        off = m.pop16()
+        n, chars = _te_read(tb, hte)
+        f0, fa0, s0, c0, h0, a0 = chars[min(off, n - 1)] if n else (0, 0, 12, bytes(6), 16, 12)
+        m.w16(ps, f0)
+        m.w8(ps + 2, fa0)
+        m.w8(ps + 3, 0)
+        m.w16(ps + 4, s0)
+        m.wbytes(ps + 6, c0)
+        m.w16(ph, h0 or s0 + 4)
+        m.w16(pa, a0 or s0)
+        return
+    if sel == 4:                # TEGetStyleHandle(hTE): TEStyleHandle
+        hte = m.pop32()
+        tb.ret32(_te_style(tb, hte))
+    elif sel == 5:              # TESetStyleHandle(theHandle, hTE)
+        hte, h = m.pop32(), m.pop32()
+        t = tb.heap.deref(hte)
+        if m.s16(t + 80) == -1:
+            m.w32(t + 74, h)
+    elif sel == 13:             # TENumStyles(rangeStart, rangeEnd, hTE): LONGINT
+        hte = m.pop32()
+        end, start = m.s32(m.sp), m.s32(m.sp + 4)
+        m.sp = m.sp + 8
+        hs = _te_style(tb, hte)
+        n = 1
+        if hs:
+            sp = tb.heap.deref(hs)
+            starts = [m.r16(sp + 20 + 4 * i) for i in range(m.r16(sp))]
+            n = max(1, sum(1 for x in starts if start <= x < end) + (0 if start in starts else 1))
+        tb.ret32(n)
+    else:
+        raise Unimplemented("TEDispatch selector %d" % sel)
+
+
+@tb_trap(0xA9D1)
+def _te_set_select(tb, op):
+    m = tb.m
+    hte, end, start = m.pop32(), m.pop32(), m.pop32()
+    t = tb.heap.deref(hte)
+    n = m.r16(t + 60)
+    m.w16(t + 32, max(0, min(start, n)))
+    m.w16(t + 34, max(0, min(end, n)))
+
+
+@tb_trap(0xA9D0, 0xA9D8, 0xA9D9, 0xA9DA)
+def _te_one_handle_noop(tb, op):
+    """TECalText, TEActivate, TEDeactivate, TEIdle: nothing to draw."""
+    tb.m.pop32()
+
+
+@tb_trap(0xA9D3)
+def _te_update(tb, op):
+    tb.m.pop32()
+    tb.m.pop32()
+
+
+@tb_trap(0xA9CB)
+def _te_get_text(tb, op):
+    hte = tb.m.pop32()
+    tb.ret32(tb.m.r32(tb.heap.deref(hte) + 62))
+
+
+@tb_trap(0xA9CF)
+def _te_set_text(tb, op):
+    m, heap = tb.m, tb.heap
+    hte, n, p = m.pop32(), m.pop32(), m.pop32()
+    t = heap.deref(hte)
+    h = m.r32(t + 62)
+    heap.set_size(h, n)
+    m.wbytes(heap.deref(h), m.rbytes(p, n))
+    m.w16(t + 60, n)
+
+
+@tb_trap(0xA9CD)
+def _te_dispose(tb, op):
+    heap = tb.heap
+    hte = tb.m.pop32()
+    if not heap.is_handle(hte):
+        return
+    t = heap.deref(hte)
+    hs = _te_style(tb, hte)
+    if hs and heap.is_handle(hs):
+        sp = heap.deref(hs)
+        for off in (4, 8, 16):
+            h = tb.m.r32(sp + off)
+            if heap.is_handle(h):
+                heap.dispose(h)
+        heap.dispose(hs)
+    h = tb.m.r32(t + 62)
+    if heap.is_handle(h):
+        heap.dispose(h)
+    heap.dispose(hte)
+
+
 @tb_trap(0xA9B9)
 def _get_cursor(tb, op):
     rid = tb.m.pops16()
