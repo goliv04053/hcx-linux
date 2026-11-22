@@ -3,3 +3,4 @@ __pycache__/
 build/
 HCX-x86_64.AppImage
 runtime-x86_64
+tools/xemu/_hcxcpu.so

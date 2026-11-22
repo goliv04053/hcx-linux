@@ -94,6 +94,47 @@ def get_str(it, a):
     return _cstr(r[3])
 
 
+def _str_list(data):
+    n = int.from_bytes(data[:2], "big") if len(data) >= 2 else 0
+    out, p = [], 2
+    for _ in range(n):
+        if p >= len(data):
+            break
+        k = data[p]
+        out.append(data[p + 1:p + 1 + k].decode("mac_roman", "replace").replace("\r", "\n"))
+        p += 1 + k
+    return out
+
+
+@xfcn("GetIndStr", "GetIndString")
+def get_ind_str(it, a):
+    """GetIndStr(STR# name or id, index): one string of a string list."""
+    r = _find_resource(it, ("STR#",), _arg(a, 0))
+    if r is None or not ht.is_number(_arg(a, 1)):
+        return ""
+    items = _str_list(r[3])
+    i = int(ht.to_num(_arg(a, 1)))
+    return items[i - 1] if 1 <= i <= len(items) else ""
+
+
+@xfcn("GetRegionCode")
+def get_region_code(it, a):
+    """The region code of the HyperCard application's 'vers' resource. HCX
+    answers 0 (U.S.), so Voyager's Library shows its English strings."""
+    return "0"
+
+
+@xcmd("DeleteResID")
+def delete_res_id(it, a):
+    """DeleteResID type, name or id. Resources are read only in HCX, so
+    this only forgets a string set with SetStr in this session."""
+    rtype = str(_arg(a, 0)).ljust(4)[:4]
+    r = _find_resource(it, (rtype,), _arg(a, 1))
+    over = it.host.str_overrides.pop(str(_arg(a, 1)).lower(), None) if rtype == "CSTR" else None
+    if r is None and over is None:
+        it.result = "Resource not found."
+
+
 @xcmd("SetStr", "SetCSTR", "PutStr")
 def set_str(it, a):
     # kept for this session; the original wrote into the stack's resource fork
@@ -112,7 +153,7 @@ def list_resources(it, a):
     out = []
     for res in it.host.resource_chain(False):
         out += [r[2] or str(r[1]) for r in res if r[0] == rtype]
-    return "\n".join(out)
+    return "".join(n + "\n" for n in out)      # Voyager's version ends every line
 
 
 def twtx_text(data):
@@ -149,6 +190,11 @@ def char_in_str(it, a):
 
 @xfcn("GetCharWidth", "CharWidth", "TextWidth", "StringWidth")
 def char_width(it, a):
+    """GetCharWidth(font, size, ASCII value) in Voyager's Library; the other
+    names take (text, font, size)."""
+    if len(a) >= 3 and not ht.is_number(_arg(a, 0)) and ht.is_number(_arg(a, 1)) and ht.is_number(_arg(a, 2)):
+        ch = bytes([int(ht.to_num(_arg(a, 2))) & 0xFF]).decode("mac_roman")
+        return str(it.host.text_width(ch, str(_arg(a, 0)), int(ht.to_num(_arg(a, 1)))))
     return str(it.host.text_width(str(_arg(a, 0)), str(_arg(a, 1, "Geneva")), int(ht.to_num(_arg(a, 2, "12") or 12))))
 
 
@@ -161,7 +207,21 @@ def get_clicked_word(it, a):
 
 @xfcn("FontExists")
 def font_exists(it, a):
-    return ht.TRUE
+    """FontExists(name[, size]): whether the Mac knows the font, i.e. it is
+    one of the classic system fonts or a FOND in the stack's resources.
+    Any size counts: HCX scales outline replacements."""
+    name = str(_arg(a, 0)).strip().lower()
+    try:
+        from .render import MAC_FONT_IDS
+        known = {n.lower() for n in MAC_FONT_IDS.values()}
+    except Exception:  # noqa: BLE001
+        known = {"chicago", "geneva", "new york", "monaco", "times", "helvetica", "courier", "palatino"}
+    if name in known:
+        return ht.TRUE
+    for res in it.host.resource_chain(False):
+        if any(r[0] == "FOND" and r[2].lower() == name for r in res):
+            return ht.TRUE
+    return ht.FALSE
 
 
 @xfcn("MainScreenRect", "ScreenRect")
@@ -300,14 +360,35 @@ def file_size(it, a):
         return "0"
 
 
+_DIR_IDS = {}
+
+
+def _dir_id(folder):
+    """A folder's number, like an HFS dirID: 2 for a volume (a folder at the
+    top of the sandbox), others numbered from 100 in the order they are
+    asked for, and the same for the rest of the session."""
+    from .hthost import files_root
+    folder = os.path.realpath(folder)
+    if os.path.dirname(folder) == os.path.realpath(files_root()):
+        return 2
+    return _DIR_IDS.setdefault(folder, 100 + len(_DIR_IDS))
+
+
 @xfcn("GetPathInfo", "PathInfo")
 def path_info(it, a):
-    p = _local(_arg(a, 0))
-    if os.path.isdir(p):
-        return "folder"
-    if os.path.exists(p):
-        return "file"
-    return ""
+    """GetPathInfo(path) in Voyager's Library: "vRefNum,dirID,name" for the
+    folder that holds the last part of the path (which need not exist).
+    With no parameter it reads the path from the global xyzTempGlobal, as
+    Voyager's other externals call it. The vRefNum is HyperCard's -1 printed
+    unsigned, like the original."""
+    path = str(_arg(a, 0)) if a else str(it.globals.get("xyztempglobal", ""))
+    path = path.rstrip(":") if path.count(":") > 1 or not path.endswith(":") else path
+    vol, _, rest = path.partition(":")
+    leaf = rest.rsplit(":", 1)[-1] if rest else ""
+    parent = _local(vol + ":" + rest.rsplit(":", 1)[0]) if ":" in rest else _local(vol)
+    if not os.path.isdir(parent):
+        return "0,0,"
+    return "4294967295,%d,%s" % (_dir_id(parent), leaf)
 
 
 @xcmd("DeleteFile", "FileDelete")
