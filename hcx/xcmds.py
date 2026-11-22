@@ -10,7 +10,6 @@ Files that externals read or write go to HCX's sandbox folder
 to folders inside it."""
 
 import os
-import shutil
 
 from . import hypertalk as ht
 
@@ -137,6 +136,9 @@ def delete_res_id(it, a):
 
 @xcmd("SetStr", "SetCSTR", "PutStr")
 def set_str(it, a):
+    if len(a) < 2:
+        it.result = "Invalid number of parameters."
+        return
     # kept for this session; the original wrote into the stack's resource fork
     it.host.str_overrides[str(_arg(a, 0)).lower()] = str(_arg(a, 1))
 
@@ -400,68 +402,216 @@ def delete_file(it, a):
         return
     try:
         if os.path.isdir(p):
-            shutil.rmtree(p)
+            os.rmdir(p)         # like the File Manager: only an empty folder
         else:
             os.remove(p)
-    except OSError as e:
-        it.result = str(e)
+    except OSError:
+        it.result = "File not deleted"
 
 
 @xcmd("CreateFolder", "NewFolder", "MakeFolder")
 def create_folder(it, a):
+    """CreateFolder folder path, name (Voyager's Library) or CreateFolder
+    full path (other stacks)."""
+    if len(a) >= 2:
+        parent = _local(_arg(a, 0).rstrip(":") or _arg(a, 0))
+        if not os.path.isdir(parent):
+            it.result = "Could not get directory id."
+            return
+        p = os.path.join(parent, str(_arg(a, 1)).replace("/", "_").replace(":", "_"))
+        if os.path.exists(p):
+            it.result = "Could not create new folder."
+            return
+        try:
+            os.mkdir(p)
+        except OSError:
+            it.result = "Could not create new folder."
+        return
     try:
         os.makedirs(_local(_arg(a, 0)), exist_ok=True)
     except OSError as e:
         it.result = str(e)
 
 
-def _append(path, text):
+# -- Voyager's indexed data files ------------------------------------------------------------
+# The Library of the Expanded Books saves the reader's marks ("Export
+# markings") as a data file of entries, each a 4-byte length and the bytes,
+# plus an index file of 4-byte offsets (one per entry and one for the end of
+# the data). Style entries hold a field's TextEdit style record: the runs
+# (startChar, styleIndex, ending with teLength + 1) and the style table
+# (stCount, stHeight, stAscent, stFont, stFace, stSize, stColor). The layout
+# was checked against the original externals in tools/xemu.
+
+_FACE_BITS = {"bold": 1, "italic": 2, "underline": 4, "outline": 8, "shadow": 16,
+              "condensed": 32, "extend": 64, "group": 128}
+
+
+def _append_entry(path, data):
     p = _local(path)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "ab") as fh:
-        fh.write(str(text).replace("\n", "\r").encode("mac_roman", "replace"))
+        fh.write(len(data).to_bytes(4, "big") + data)
+
+
+def _field_ref(it, layer, num):
+    kind = "card" if str(layer).strip().lower().startswith("c") else "bkgnd"
+    if not ht.is_number(num):
+        return None
+    try:
+        ref = ht.parse_ref(it, "%s field %d" % (kind, int(ht.to_num(num))))
+    except ht.HTError:
+        return None
+    return ref if isinstance(ref, ht.Obj) and ref.t == "part" else None
+
+
+def _style_record(it, ref):
+    """A field's styles as the bytes of a TextEdit style record."""
+    host = it.host
+    p = ref.b
+    c = host.content_of(ref.a, p, ref.c, card=ref.d)
+    text = c.text if c is not None else ""
+    n = len(text)
+    ids = host._style_list(c, n, p) if c is not None and n else []
+    table, index, runs = [], {}, []
+    prev = object()
+    for i, sid in enumerate(ids or [None]):
+        if sid == prev:
+            continue
+        prev = sid
+        d = host.stack.styles.get(sid, {}) if sid is not None else {}
+        font = d.get("font") if d.get("font") is not None else p.text_font_id
+        size = d.get("size") if d.get("size") is not None else p.text_size
+        style = d.get("style") if d.get("style") is not None else set(p.text_style)
+        key = (font, size, frozenset(style))
+        if key not in index:
+            index[key] = len(table)
+            table.append([0, key])
+        table[index[key]][0] += 1
+        runs.append((i, index[key]))
+    from .render import MAC_FONT_IDS
+    by_name = {v.lower(): k for k, v in MAC_FONT_IDS.items()}
+    out = bytearray((len(runs) + 1).to_bytes(2, "big"))
+    for start, k in runs + [(n + 1, 0xFFFF)]:
+        out += start.to_bytes(2, "big") + k.to_bytes(2, "big")
+    out += len(table).to_bytes(2, "big")
+    for count, (font, size, style) in table:
+        mac_font = by_name.get(host.font_name(font).lower(), font)
+        face = sum(_FACE_BITS.get(x, 0) for x in style)
+        ascent = int(size)
+        height = int(size) + max(2, int(size) // 4) + 1
+        out += (count.to_bytes(2, "big") + height.to_bytes(2, "big") + ascent.to_bytes(2, "big") +
+                (mac_font & 0xFFFF).to_bytes(2, "big") + bytes([face & 0xFF, 0]) +
+                int(size).to_bytes(2, "big") + bytes(6))
+    return bytes(out)
+
+
+def _apply_style_record(it, ref, data):
+    host = it.host
+    p = ref.b
+    c = host.content_of(ref.a, p, ref.c, card=ref.d)
+    if c is None or len(data) < 4:
+        return
+    nruns = int.from_bytes(data[:2], "big")
+    runs = [(int.from_bytes(data[2 + 4 * i:4 + 4 * i], "big"), int.from_bytes(data[4 + 4 * i:6 + 4 * i], "big"))
+            for i in range(nruns)]
+    o = 2 + 4 * nruns
+    nstyles = int.from_bytes(data[o:o + 2], "big")
+    from .render import MAC_FONT_IDS
+    sids = []
+    for k in range(nstyles):
+        e = data[o + 2 + 18 * k:o + 20 + 18 * k]
+        if len(e) < 18:
+            break
+        mac_font = int.from_bytes(e[6:8], "big")
+        face = e[8]
+        size = int.from_bytes(e[10:12], "big")
+        name = MAC_FONT_IDS.get(mac_font)
+        font = host.font_id(name) if name else mac_font
+        style = {x for x, b in _FACE_BITS.items() if face & b}
+        sids.append(host._style_id(font, size, style))
+    n = len(c.text or "")
+    c.runs = [(start, sids[k]) for start, k in runs if k < len(sids) and start < max(n, 1)]
+    host.changed(ref)
 
 
 @xcmd("AppendDataToFile", "AppendToFile")
 def append_data(it, a):
-    _append(_arg(a, 0), _arg(a, 1))
+    """AppendDataToFile data, length, file: adds an entry."""
+    data = str(_arg(a, 0)).replace("\n", "\r").encode("mac_roman", "replace")
+    if ht.is_number(_arg(a, 1)):
+        data = data[:max(0, int(ht.to_num(_arg(a, 1))))]
+    _append_entry(_arg(a, 2), data)
 
 
 @xcmd("AppendStyleDataToFile")
 def append_style_data(it, a):
-    # styles are not kept; the text is
-    _append(_arg(a, 0), _arg(a, 1))
-
-
-@xfcn("GetFileIndexedEntry")
-def get_file_indexed_entry(it, a):
-    """(file, index) → entry `index` of a file made of return-separated entries."""
-    try:
-        with open(_local(_arg(a, 0)), "rb") as fh:
-            text = fh.read().decode("mac_roman", "replace")
-    except OSError:
-        return ""
-    entries = text.split("\r")
-    n = int(ht.to_num(_arg(a, 1, "1") or 1))
-    return entries[n - 1] if 0 < n <= len(entries) else ""
-
-
-@xcmd("ApplyFileIndxEntryToTE")
-def apply_file_entry(it, a):
-    # puts an entry of an index file into a field: (file, index, field number)
-    text = get_file_indexed_entry(it, a[:2])
-    try:
-        ref = ht.parse_ref(it, "field %s" % _arg(a, 2, "1"))
-        if ref is not None:
-            it.put_into(ref, text)
-    except ht.HTError:
-        pass
+    """AppendStyleDataToFile "b"|"c", field number, file: adds an entry with
+    the field's text styles."""
+    ref = _field_ref(it, _arg(a, 0), _arg(a, 1))
+    if ref is None:
+        it.result = "Could not get the TE handle."
+        return
+    _append_entry(_arg(a, 2), _style_record(it, ref))
 
 
 @xcmd("BuildIndex")
 def build_index(it, a):
-    # HCX searches fields directly, so no index is needed
-    return None
+    """BuildIndex data file, index file: writes the offsets of the entries."""
+    try:
+        with open(_local(_arg(a, 0)), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        it.result = "Could not open the data file."
+        return
+    offs, o = [], 0
+    while o + 4 <= len(data):
+        offs.append(o)
+        o += 4 + int.from_bytes(data[o:o + 4], "big")
+    offs.append(len(data))
+    p = _local(_arg(a, 1))
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as fh:
+        fh.write(b"".join(x.to_bytes(4, "big") for x in offs))
+
+
+def _indexed_entry(n, data_file, index_file):
+    try:
+        with open(_local(index_file), "rb") as fh:
+            idx = fh.read()
+        with open(_local(data_file), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    count = len(idx) // 4 - 1
+    if not ht.is_number(n) or not 1 <= int(ht.to_num(n)) <= count:
+        return None
+    o = int.from_bytes(idx[4 * (int(ht.to_num(n)) - 1):4 * int(ht.to_num(n))], "big")
+    size = int.from_bytes(data[o:o + 4], "big")
+    return data[o + 4:o + 4 + size]
+
+
+@xfcn("GetFileIndexedEntry")
+def get_file_indexed_entry(it, a):
+    """GetFileIndexedEntry(n, data file, index file): the text of entry n."""
+    e = _indexed_entry(_arg(a, 0), _arg(a, 1), _arg(a, 2))
+    if e is None:
+        return "Error -- Could not find the entry."
+    return e.decode("mac_roman", "replace").replace("\r", "\n")
+
+
+@xcmd("ApplyFileIndxEntryToTE")
+def apply_file_entry(it, a):
+    """ApplyFileIndxEntryToTE n, data file, "b"|"c", field number, index
+    file: gives the field the styles saved in entry n."""
+    ref = _field_ref(it, _arg(a, 2), _arg(a, 3))
+    if ref is None:
+        it.result = "Could not get the TEHandle!"
+        return
+    e = _indexed_entry(_arg(a, 0), _arg(a, 1), _arg(a, 4))
+    if e is None:
+        it.result = "Error -- Could not find the entry."
+        return
+    _apply_style_record(it, ref, e)
 
 
 # -- clipboard -----------------------------------------------------------------------------

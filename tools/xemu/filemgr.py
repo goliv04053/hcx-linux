@@ -102,9 +102,6 @@ class FileManager:
         self._scan_volumes()
         self.default_vref = -1
         self.default_dir = _ROOT_ID
-        self.dirs = {}                  # (vref, dirID) -> local path
-        self.dir_ids = {}               # local path -> dirID
-        self.next_dir = 100
         self.wds = {}                   # WD refNum -> (vref, dirID)
         self.next_wd = -32000
         self.fcbs = {}                  # refNum -> _Open
@@ -132,28 +129,23 @@ class FileManager:
         return None
 
     def dir_id(self, vref, path):
+        """Folder numbers are shared with HCX's native externals (xcmds),
+        so a dirID that one gives the other can use, as on the Mac."""
+        from hcx import xcmds
         if os.path.realpath(path) == os.path.realpath(self.vol_path(vref)):
             return _ROOT_ID
-        path = os.path.realpath(path)
-        i = self.dir_ids.get(path)
-        if i is None:
-            i = self.next_dir
-            self.next_dir += 1
-            self.dir_ids[path] = i
-            self.dirs[(vref, i)] = path
-        return i
+        return xcmds._dir_id(path)
 
     def dir_path(self, vref, dirid):
-        if dirid in (0, _ROOT_ID) or vref not in self.vols:
-            return self.vol_path(vref) if vref in self.vols else None
-        if dirid == 1:
+        if vref not in self.vols:
             return None
-        p = self.dirs.get((vref, dirid))
-        if p is None:
-            for (v, i), q in self.dirs.items():
-                if i == dirid:
-                    return q
-        return p
+        if dirid in (0, _ROOT_ID):
+            return self.vol_path(vref)
+        from hcx import xcmds
+        for p, i in xcmds._DIR_IDS.items():
+            if i == dirid:
+                return p
+        return None
 
     def inside(self, path):
         p = os.path.realpath(path)
@@ -635,7 +627,7 @@ def _vol_info(tb, op):
     m.w32(pb + 48, blk)                         # ioVAlBlkSiz
     m.w32(pb + 52, blk)                         # ioVClpSiz
     m.w16(pb + 56, 0)                           # ioAlBlSt
-    m.w32(pb + 58, fm.next_dir)                 # ioVNxtCNID
+    m.w32(pb + 58, 1000)                        # ioVNxtCNID
     m.w16(pb + 62, min(du.free // blk, 0xFFFF))  # ioVFrBlk
     if _hfs(op):
         m.w16(pb + 64, 0x4244)                  # ioVSigWord 'BD'
