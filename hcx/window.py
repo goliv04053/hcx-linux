@@ -767,7 +767,7 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
     def text_width(self, text, font="Geneva", size=12):
         from .render import linux_family
         lay = self.create_pango_layout(str(text))
-        fd = Pango.FontDescription.from_string("%s %dpx" % (linux_family(font), size))
+        fd = Pango.FontDescription.from_string("%s %dpx" % (linux_family(font, size), size))
         lay.set_font_description(fd)
         return lay.get_pixel_size()[0]
 
@@ -1249,6 +1249,14 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
 
         def work():
             res = macfiles.open_path(path)
+            res.mac_fonts = []
+            res.mac_home = None
+            if res.kind == "hfs":
+                from . import macfonts
+                from .hthost import find_home_stack, user_home_stack
+                res.mac_fonts = macfonts.importable(res.files)
+                if not os.path.exists(user_home_stack()):
+                    res.mac_home = find_home_stack(res.files)
             return ("opened", res, path)
         self._run(work)
 
@@ -1273,6 +1281,8 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         if kind == "error":
             self._fail(val)
         elif kind == "opened":
+            if getattr(val, "mac_fonts", None) or getattr(val, "mac_home", None):
+                self._offer_mac_fonts(val)
             stacks = val.stacks
             if not stacks and getattr(val, "errors", None):
                 self._fail(_("No HyperCard stack could be extracted from this archive. Some files in it could not be read (%s).")
@@ -1286,6 +1296,43 @@ class HCXWindow(Adw.ApplicationWindow, HostMixin):
         elif kind == "stack":
             self._show_stack(val, extra)
         return False
+
+    def _offer_mac_fonts(self, res):
+        """A Mac disk with fonts was opened: offer to use them (they stay on this computer)."""
+        names = res.mac_fonts
+        home = getattr(res, "mac_home", None)
+        shown = ", ".join(names[:4]) + ("…" if len(names) > 4 else "")
+        if names and home is not None:
+            text = _("This disk has Mac fonts (%s) and a Home stack.") % shown
+        elif names:
+            text = _("This disk has Mac fonts (%s).") % shown
+        else:
+            text = _("This disk has a Home stack.")
+        t = Adw.Toast(title=GLib.markup_escape_text(text))
+        t.set_button_label(_("Use Them") if names else _("Use It"))
+        t.set_timeout(0)
+        files = res.files
+
+        def use(_t):
+            from . import macfonts
+            from .hthost import save_home_stack
+            n = macfonts.import_fonts(files) if names else 0
+            if home is not None:
+                try:
+                    save_home_stack(home)
+                    self._stack_cache.pop("home", None)
+                except OSError:
+                    pass
+            if self.stack is not None:
+                self.view.refresh()
+            if n:
+                self.toast(_("%d Mac fonts copied to HCX. Stacks now use them.") % n)
+            elif home is not None:
+                self.toast(_("HCX will use this Home stack for “go home”."))
+            else:
+                self.toast(_("No fonts could be read."))
+        t.connect("button-clicked", use)
+        self.toasts.add_toast(t)
 
     def _choose_stack(self, stacks, path, kind="hfs"):
         body = _("This disk image contains several stacks.") if kind == "hfs" else \

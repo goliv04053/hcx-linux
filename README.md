@@ -57,6 +57,12 @@ As traduções são arquivos `.po` comuns, na pasta `hcx/locale/`. Qualquer pess
 
 Na primeira vez a pilha é convertida para um pacote `.hcxs`, guardado em `~/.local/share/hcx/stacks`. Das próximas vezes ela abre na hora.
 
+## Fontes do Mac
+
+As fontes do Mac (Chicago, Geneva, New York, Monaco…) são da Apple e não podem vir junto com o HCX, então ele usa fontes parecidas do Linux. Elas são um pouco mais largas, e às vezes o fim de um texto fica cortado.
+
+Se você tiver um disco do Mac (por exemplo o CD do System 7.5.3, que a Apple distribuiu de graça), abra a imagem no HCX. Ele avisa que o disco tem fontes e oferece **Usar**. As fontes são copiadas para `~/.local/share/hcx/fonts`, e a partir daí as pilhas aparecem com as letras originais, pixel por pixel, nos mesmos tamanhos e com as mesmas larguras do Mac. Se o disco tiver uma pilha Home, ela passa a ser usada pelo `go home`.
+
 ## Como usar
 
 - **Navegar:** setas ← → (ou PageUp/PageDown, espaço), Home/End, Ctrl+1/2/3/4 (primeiro, anterior, próximo, último, como no HyperCard), botões no topo

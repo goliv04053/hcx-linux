@@ -39,8 +39,9 @@ class HCXApp(Adw.Application):
         theme.add_search_path(os.path.join(here, "data", "hicolor"))
         css = Gtk.CssProvider()
         css.load_from_string(CSS)
-        from . import scriptui
+        from . import scriptui, macfonts
         scriptui.install_css()
+        macfonts.register()          # the Mac fonts the user imported from a Mac disk
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         Gtk.Window.set_default_icon_name(APP_ID)

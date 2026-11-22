@@ -25,7 +25,9 @@ Pull requests and issues are welcome in English too.*
 - [x] Arquivos Compact Pro (.cpt) e autoextraíveis (.sea), e os métodos 5 (LZAH) e 8 (MW) do StuffIt. Testado com os 632 arquivos da seção HyperCard do arquivo de Mac da Universidade de Michigan: todos os que têm pilhas abrem (869 pilhas)
 - [x] Fala: `speak`, `the speech`, `the voices` e os XCMDs de fala (Say, MacinTalkSay, Vocalise, SpeakText…) usando o speech-dispatcher do Linux ou o eSpeak NG
 - [ ] QuickTime: QTPict e os XCMDs de filme
-- [ ] Fontes bitmap do Mac guardadas na pilha (recursos FONT/NFNT), para o texto quebrar a linha no mesmo lugar que no Mac
+- [x] Fontes do Mac tiradas de um disco do usuário (System, pasta Fonts): os tamanhos em bitmap viram fontes com os mesmos pixels e larguras, e as TrueType são usadas nos outros tamanhos. A pilha Home do disco passa a ser a do `go home`
+- [ ] Fontes bitmap guardadas dentro da própria pilha (recursos FONT/NFNT)
+- [ ] Spleen 6x12 (licença BSD) como reserva para a Monaco 9 de quem não tem um disco do Mac
 - [ ] Mais XCMDs/XFCNs reescritos, conforme as pilhas que a comunidade testar
 
 ## 3.4: pilhas que reagem ao usuário

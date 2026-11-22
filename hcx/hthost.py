@@ -32,6 +32,28 @@ def mac_to_local(path):
     return os.path.join(files_root(), *parts)
 
 
+def user_home_stack():
+    """Where the Home stack copied from the user's Mac disk is kept."""
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "hcx", "home", "Home")
+
+
+def find_home_stack(files):
+    """The Home stack among the files of a Mac disk, or None."""
+    homes = [f for f in files if f.is_stack() and f.name.lower() == "home"]
+    return homes[0] if homes else None
+
+
+def save_home_stack(mf):
+    """Keep a copy of the user's Home stack, for `go home`."""
+    path = user_home_stack()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(mf.data)
+    with open(path + ".rsrc", "wb") as fh:
+        fh.write(mf.rsrc or b"")
+
+
 def local_to_mac(path):
     """The inverse of mac_to_local: a file inside HCX's sandbox folder gets
     a Mac path ("HD:Folder:File"); other files keep their Linux path."""
@@ -457,6 +479,18 @@ class HostMixin:
                                 return st
             except OSError:
                 pass
+        if short == "home" and os.path.exists(user_home_stack()):
+            try:
+                res = macfiles.open_path(user_home_stack())
+                if res.stacks:
+                    mf = res.stacks[0]
+                    pkg = import_stack(mf, user_home_stack(), encoding=getattr(self, "encoding", "auto"))
+                    st = read_xml(pkg)
+                    st.mac_path = "HD:HyperCard:Home"
+                    self.stack_sources[id(st)] = (mf, user_home_stack())
+                    return st
+            except Exception as e:  # noqa: BLE001
+                self.log("importing the Home stack: %s" % e)
         return None
 
     def start_using(self, name):

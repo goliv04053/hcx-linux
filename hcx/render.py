@@ -46,7 +46,14 @@ MONO = ("monaco", "courier", "osaka−等幅", "osaka-等幅", "monospace")
 BOLDISH = ("chicago", "charcoal")
 
 
-def linux_family(mac_name):
+def linux_family(mac_name, size=None):
+    """The font to draw a Mac font with: the user's own Mac font when it was
+    imported from a Mac disk (see macfonts), else a similar Linux font."""
+    if size:
+        from . import macfonts
+        fam = macfonts.family_for(mac_name, size)
+        if fam:
+            return fam
     n = (mac_name or "").lower()
     if any(k in n for k in MONO):
         return "Monospace"
@@ -169,9 +176,11 @@ class Renderer:
     def font_desc(self, fid, size, styles):
         name = self.font_name(fid)
         fd = Pango.FontDescription.new()
-        fd.set_family(linux_family(name))
+        fam = linux_family(name, size)
+        fd.set_family(fam)
         fd.set_absolute_size(max(1, size) * Pango.SCALE)
-        if "bold" in styles or any(k in name.lower() for k in BOLDISH):
+        real = fam.lower().startswith("hcx ") or fam.lower() == name.lower()
+        if "bold" in styles or (not real and any(k in name.lower() for k in BOLDISH)):
             fd.set_weight(Pango.Weight.BOLD)
         if "italic" in styles:
             fd.set_style(Pango.Style.ITALIC)

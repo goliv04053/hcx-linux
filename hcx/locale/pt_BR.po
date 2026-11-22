@@ -7,15 +7,15 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 
-#: hcx/app.py:100
+#: hcx/app.py:101
 msgid "The new language is used after HCX restarts."
 msgstr "O novo idioma vale depois que o HCX reiniciar."
 
-#: hcx/app.py:101
+#: hcx/app.py:102
 msgid "Restart Now"
 msgstr "Reiniciar agora"
 
-#: hcx/app.py:122
+#: hcx/app.py:123
 msgid "A HyperCard stack reader for Linux"
 msgstr "Leitor de pilhas HyperCard para Linux"
 
@@ -279,15 +279,15 @@ msgstr "Centralizado"
 msgid "Align right"
 msgstr "À direita"
 
-#: hcx/scriptui.py:76 hcx/scriptui.py:97 hcx/window.py:1113 hcx/window.py:1304
+#: hcx/scriptui.py:76 hcx/scriptui.py:97 hcx/window.py:1116 hcx/window.py:1354
 msgid "Cancel"
 msgstr "Cancelar"
 
-#: hcx/scriptui.py:77 hcx/scriptui.py:98 hcx/window.py:1233
+#: hcx/scriptui.py:77 hcx/scriptui.py:98 hcx/window.py:1236
 msgid "OK"
 msgstr "OK"
 
-#: hcx/scriptui.py:351 hcx/window.py:1115
+#: hcx/scriptui.py:351 hcx/window.py:1118
 msgid "Save"
 msgstr "Salvar"
 
@@ -295,7 +295,7 @@ msgstr "Salvar"
 msgid "Open"
 msgstr "Abrir"
 
-#: hcx/scriptui.py:365 hcx/window.py:1186
+#: hcx/scriptui.py:365 hcx/window.py:1189
 msgid "All files"
 msgstr "Todos os arquivos"
 
@@ -339,7 +339,7 @@ msgstr "Próximo cartão"
 msgid "Last Card"
 msgstr "Último cartão"
 
-#: hcx/window.py:126 hcx/window.py:107 hcx/window.py:221 hcx/window.py:1184
+#: hcx/window.py:126 hcx/window.py:107 hcx/window.py:221 hcx/window.py:1187
 msgid "Open Stack…"
 msgstr "Abrir pilha…"
 
@@ -387,7 +387,7 @@ msgstr "Codificação do texto"
 msgid "Reimport Stack"
 msgstr "Reimportar pilha"
 
-#: hcx/window.py:143 hcx/window.py:1419
+#: hcx/window.py:143 hcx/window.py:1469
 msgid "Export Package…"
 msgstr "Exportar pacote .hcxs…"
 
@@ -483,58 +483,90 @@ msgstr "Para imprimir é preciso o suporte a cairo do PyGObject (sudo dnf instal
 msgid "Changes saved. They stay when you open this stack again."
 msgstr "Alterações salvas. Elas continuam quando você abrir esta pilha de novo."
 
-#: hcx/window.py:1111
+#: hcx/window.py:1114
 msgid "Save changes?"
 msgstr "Salvar alterações?"
 
-#: hcx/window.py:1112
+#: hcx/window.py:1115
 msgid "This stack has changes that were not saved."
 msgstr "Esta pilha tem alterações que não foram salvas."
 
-#: hcx/window.py:1114
+#: hcx/window.py:1117
 msgid "Discard"
 msgstr "Descartar"
 
-#: hcx/window.py:1175
+#: hcx/window.py:1178
 msgid "Press Ctrl+S to keep your changes."
 msgstr "Aperte Ctrl+S para guardar as alterações."
 
-#: hcx/window.py:1221
+#: hcx/window.py:1224
 msgid "Reading file…"
 msgstr "Lendo o arquivo…"
 
-#: hcx/window.py:1244 hcx/window.py:1278
+#: hcx/window.py:1247 hcx/window.py:1291
 msgid "No HyperCard stack was found in this file."
 msgstr "Nenhuma pilha HyperCard foi encontrada neste arquivo."
 
-#: hcx/window.py:1258
+#: hcx/window.py:1269
 msgid "HFS+ (Mac OS Extended) disk images are not supported yet. Copy the stack out of the image first (for example with hfsplus or a Mac)."
 msgstr "Imagens de disco HFS+ (Mac OS Estendido) ainda não são suportadas. Copie a pilha para fora da imagem antes (por exemplo com hfsplus ou num Mac)."
 
-#: hcx/window.py:1264 hcx/window.py:1261
+#: hcx/window.py:1275 hcx/window.py:1272
 msgid "Could not open the stack: %s"
 msgstr "Não foi possível abrir a pilha: %s"
 
-#: hcx/window.py:1275
+#: hcx/window.py:1288
 msgid "No HyperCard stack could be extracted from this archive. Some files in it could not be read (%s)."
 msgstr "Nenhuma pilha HyperCard pôde ser extraída deste arquivo compactado. Alguns arquivos dentro dele não puderam ser lidos (%s)."
 
-#: hcx/window.py:1288
+#: hcx/window.py:1306
+msgid "This disk has Mac fonts (%s) and a Home stack."
+msgstr "Este disco tem fontes do Mac (%s) e uma pilha Home."
+
+#: hcx/window.py:1308
+msgid "This disk has Mac fonts (%s)."
+msgstr "Este disco tem fontes do Mac (%s)."
+
+#: hcx/window.py:1310
+msgid "This disk has a Home stack."
+msgstr "Este disco tem uma pilha Home."
+
+#: hcx/window.py:1312
+msgid "Use Them"
+msgstr "Usar"
+
+#: hcx/window.py:1312
+msgid "Use It"
+msgstr "Usar"
+
+#: hcx/window.py:1329
+msgid "%d Mac fonts copied to HCX. Stacks now use them."
+msgstr "%d fontes do Mac copiadas para o HCX. As pilhas já usam elas."
+
+#: hcx/window.py:1331
+msgid "HCX will use this Home stack for “go home”."
+msgstr "O HCX vai usar esta pilha Home no “go home”."
+
+#: hcx/window.py:1333
+msgid "No fonts could be read."
+msgstr "Não foi possível ler as fontes."
+
+#: hcx/window.py:1338
 msgid "This disk image contains several stacks."
 msgstr "Esta imagem de disco tem várias pilhas."
 
-#: hcx/window.py:1289
+#: hcx/window.py:1339
 msgid "This archive contains several stacks."
 msgstr "Este arquivo compactado tem várias pilhas."
 
-#: hcx/window.py:1290
+#: hcx/window.py:1340
 msgid "Choose a Stack"
 msgstr "Escolha uma pilha"
 
-#: hcx/window.py:1332
+#: hcx/window.py:1382
 msgid "Importing…"
 msgstr "Importando…"
 
-#: hcx/window.py:1434
+#: hcx/window.py:1484
 msgid "Package exported to %s"
 msgstr "Pacote exportado para %s"
