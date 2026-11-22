@@ -2,13 +2,14 @@
 
 Reads classic StuffIt archives ("SIT!", StuffIt 1.5 to 4.x) and StuffIt 5
 archives, with the compression methods they use: none (0), RLE (1),
-LZW (2), Huffman (3), LZ+Huffman (13) and Arsenic (15). Encrypted
-entries and the rare methods 5, 8 and 14 are skipped.
+LZW (2), Huffman (3), LZAH (5), MW (8), LZ+Huffman (13) and Arsenic (15).
+Encrypted entries and the rare method 14 are skipped.
 
 The decoders are a Python translation of the ones in The Unarchiver's
 XADMaster library (XADStuffItParser, XADStuffIt5Parser,
 XADStuffIt13Handle, XADStuffItArsenicHandle, XADStuffItHuffmanHandle,
-XADCompressHandle, XADRLE90Handle, XADPrefixCode and BWT.c; Copyright
+XADCompressHandle, XADRLE90Handle, XADPrefixCode, BWT.c and the libxad
+SIT_lzah and SIT_mw code in XADStuffItOldHandles; Copyright
 (c) MacPaw Way Ltd. and Dag Agren; LGPL 2.1 or later), including the
 tables of method 13 and Arsenic's randomization table."""
 
@@ -570,7 +571,165 @@ def _arsenic(data, size):
     return bytes(out[:size])
 
 
-_METHODS = {0: lambda d, s: bytes(d[:s]), 1: _rle90, 2: _lzw, 3: _huffman, 13: _method13, 15: _arsenic}
+# -- method 5: LZAH (LHarc's adaptive Huffman + LZSS, 4 KB window) ------------------------------
+
+_LZAH_N = 314
+_LZAH_T = 2 * _LZAH_N - 1
+
+
+def _lzah_tables():
+    # first 6 bits of the match offset: a static code read 8 bits at a time
+    code, length = [], []
+    groups = ((3, 1, 32), (4, 3, 16), (5, 8, 8), (6, 12, 4), (7, 24, 2), (8, 16, 1))
+    hc = 0
+    for bits, ncodes, repeat in groups:
+        for _ in range(ncodes):
+            code.extend([hc] * repeat)
+            length.extend([bits] * repeat)
+            hc += 4
+    return code, length
+
+
+_LZAH_CODE, _LZAH_LEN = _lzah_tables()
+
+
+def _lzah(data, size):
+    N, T = _LZAH_N, _LZAH_T
+    bits = _BitsBE(data)
+    read = bits.read
+    freq = [0] * (T + 1)
+    fwd = [0] * (T + 1)
+    back = [0] * (T + N + 1)
+    for i in range(N):
+        freq[i] = 1
+        fwd[i] = i + T
+        back[i + T] = i
+    i, j = 0, N
+    while j < T:
+        freq[j] = freq[i] + freq[i + 1]
+        fwd[j] = i
+        back[i] = j
+        back[i + 1] = j
+        i += 2
+        j += 1
+    freq[T] = 0xFFFF
+    back[T - 1] = 0
+    buf = bytearray(b" " * 4096)
+    bp = 0
+    out = bytearray()
+    limit = len(data) * 8 + 64
+    consumed = 0
+    while len(out) < size:
+        ch = fwd[T - 1]
+        while ch < T:
+            ch = fwd[ch + read(1)]
+            consumed += 1
+        if consumed > limit:
+            raise StuffItError("short data")
+        ch -= T
+        if freq[T - 1] >= 0x8000:
+            j = 0
+            for i in range(T):
+                if fwd[i] >= T:
+                    freq[j] = (freq[i] + 1) >> 1
+                    fwd[j] = fwd[i]
+                    j += 1
+            j = N
+            for i in range(0, T, 2):
+                l = freq[i] + freq[i + 1]
+                freq[j] = l
+                k = j - 1
+                while l < freq[k]:
+                    k -= 1
+                k += 1
+                freq[k + 1:j + 1] = freq[k:j]
+                freq[k] = l
+                fwd[k + 1:j + 1] = fwd[k:j]
+                fwd[k] = i
+                j += 1
+            for i in range(T):
+                k = fwd[i]
+                back[k] = i
+                if k < T:
+                    back[k + 1] = i
+        i = back[ch + T]
+        while True:
+            freq[i] += 1
+            jv = freq[i]
+            i1 = i + 1
+            if freq[i1] < jv:
+                i1 += 1
+                while freq[i1] < jv:
+                    i1 += 1
+                i1 -= 1
+                freq[i] = freq[i1]
+                freq[i1] = jv
+                jj = fwd[i]
+                back[jj] = i1
+                if jj < T:
+                    back[jj + 1] = i1
+                fwd[i] = fwd[i1]
+                fwd[i1] = jj
+                jj = fwd[i]
+                back[jj] = i
+                if jj < T:
+                    back[jj + 1] = i
+                i = i1
+            i = back[i]
+            if i == 0:
+                break
+        if ch < 256:
+            out.append(ch)
+            buf[bp] = ch
+            bp = (bp + 1) & 0xFFF
+        else:
+            byte = read(8)
+            skip = _LZAH_LEN[byte] - 2
+            offs = (_LZAH_CODE[byte] << 4) | (((byte << skip) + read(skip)) & 0x3F)
+            consumed += 8 + skip
+            offs = (bp - offs - 1) & 0xFFF
+            for _ in range(ch - 253):
+                c = buf[offs & 0xFFF]
+                offs += 1
+                out.append(c)
+                buf[bp] = c
+                bp = (bp + 1) & 0xFFF
+    return bytes(out[:size])
+
+
+# -- method 8: MW (Miller-Wegman LZ) ----------------------------------------------------------------
+
+def _mw(data, size):
+    bits = _BitsLE(data)
+    out = bytearray()
+    while len(out) < size and not bits.eof():
+        table = [bytes((i,)) for i in range(256)]
+        top = 256
+        nextw = 512
+        width = 9
+        ptr = bits.read(width)
+        if ptr < 256:
+            prev = table[ptr]
+            out += prev
+            while len(out) < size and not bits.eof():
+                ptr = bits.read(width)
+                if ptr >= top:
+                    break
+                cur = table[ptr]
+                table.append(prev + cur)
+                top += 1
+                if top == nextw:
+                    nextw <<= 1
+                    width += 1
+                out += cur
+                prev = cur
+        if ptr > top:
+            break
+    return bytes(out[:size])
+
+
+_METHODS = {0: lambda d, s: bytes(d[:s]), 1: _rle90, 2: _lzw, 3: _huffman, 5: _lzah, 8: _mw,
+            13: _method13, 15: _arsenic}
 
 
 def _decompress(method, data, size, crc=None):

@@ -14,6 +14,8 @@ one of these containers, all handled here:
 * BinHex 4.0 (``.hqx``)
 * HFS disk images (``.img``, ``.dsk``, ``.image``, ``.hfs``, ``.iso`` …), raw,
   with an Apple partition map, or with a DiskCopy 4.2 header.
+* StuffIt (``.sit``) and Compact Pro (``.cpt``) archives, also inside any of
+  the above and as self-extracting ``.sea`` applications.
 """
 
 import os
@@ -376,23 +378,39 @@ class OpenResult:
         return [f for f in self.files if f.is_stack()]
 
 
+def _is_archive_data(data):
+    """True for the data of a StuffIt or Compact Pro archive."""
+    from . import stuffit, compactpro
+    return bool(data) and (stuffit.is_stuffit(data) or compactpro.is_compact_pro(data))
+
+
 def _is_archive(mf):
     from . import stuffit
-    return stuffit.is_stuffit(mf.data) or (not mf.data and mf.type == b"SIT!" and stuffit.is_stuffit(mf.rsrc))
+    return _is_archive_data(mf.data) or (not mf.data and mf.type == b"SIT!" and stuffit.is_stuffit(mf.rsrc))
+
+
+def _extract_archive(data):
+    from . import stuffit, compactpro
+    if stuffit.is_stuffit(data):
+        return stuffit.extract(data)
+    return compactpro.extract(data)
+
+
+_ARCHIVE_EXTS = (".sit", ".cpt", ".sea")
 
 
 def expand_archives(files, depth=0, errors=None):
-    """Replace the StuffIt archives among files by the files inside them
-    (archives inside archives too, a few levels deep). Entries that could
-    not be extracted are added to errors as (path, reason)."""
-    from . import stuffit
+    """Replace the StuffIt and Compact Pro archives among files by the files
+    inside them (archives inside archives too, a few levels deep). Entries
+    that could not be extracted are added to errors as (path, reason)."""
+    from . import stuffit, compactpro
     out = []
     for mf in files:
-        if depth < 4 and mf.data and stuffit.is_stuffit(mf.data):
-            prefix = mf.path.rsplit(".", 1)[0] if mf.path.lower().endswith(".sit") else mf.path
+        if depth < 4 and _is_archive_data(mf.data):
+            prefix = mf.path.rsplit(".", 1)[0] if mf.path.lower().endswith(_ARCHIVE_EXTS) else mf.path
             try:
-                inner, errs = stuffit.extract(mf.data)
-            except (stuffit.StuffItError, IndexError, struct.error) as e:
+                inner, errs = _extract_archive(mf.data)
+            except (stuffit.StuffItError, compactpro.CompactProError, IndexError, struct.error) as e:
                 if errors is not None:
                     errors.append((prefix or mf.name, str(e)))
                 out.append(mf)
@@ -408,8 +426,7 @@ def expand_archives(files, depth=0, errors=None):
 
 
 def _archive_result(files, name, kind):
-    from . import stuffit
-    if not any(f.data and stuffit.is_stuffit(f.data) for f in files):
+    if not any(_is_archive_data(f.data) for f in files):
         return None
     errors = []
     files = expand_archives(files, errors=errors)
@@ -421,7 +438,6 @@ def _archive_result(files, name, kind):
 
 def open_path(path):
     """Read anything that may contain a HyperCard stack."""
-    from . import stuffit
     with open(path, "rb") as fh:
         blob = fh.read()
     name = os.path.basename(path)
@@ -429,7 +445,7 @@ def open_path(path):
     if looks_like_stack(blob):
         return OpenResult([MacFile(name, blob, _sidecar_rsrc(path), b"STAK", b"WILD")], name, "file")
 
-    if stuffit.is_stuffit(blob):
+    if _is_archive_data(blob):
         return _archive_result([MacFile(name, blob, b"", b"SIT!", b"SIT!", "")], name, "stuffit")
 
     ad = parse_apple_single_double(blob)
@@ -439,7 +455,7 @@ def open_path(path):
         return _archive_result([mf], name, "stuffit") or OpenResult([mf], name, "applesingle")
 
     mb = parse_macbinary(blob)
-    if mb is not None and mb.data and stuffit.is_stuffit(mb.data):
+    if mb is not None and _is_archive_data(mb.data):
         mb.path = ""
         return _archive_result([mb], name, "stuffit")
     if mb is not None and (mb.is_stack() or mb.rsrc):

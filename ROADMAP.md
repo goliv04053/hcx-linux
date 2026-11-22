@@ -21,6 +21,7 @@ Pull requests and issues are welcome in English too.*
 
 ## Próxima versão (3.3): fala, vídeo e fontes
 
+- [x] Arquivos Compact Pro (.cpt) e autoextraíveis (.sea), e os métodos 5 (LZAH) e 8 (MW) do StuffIt. Testado com os 632 arquivos da seção HyperCard do arquivo de Mac da Universidade de Michigan: todos os que têm pilhas abrem (869 pilhas)
 - [ ] Fala: `speak` e os XCMDs de fala (Vocalise, say) usando o speech-dispatcher do Linux
 - [ ] QuickTime: QTPict e os XCMDs de filme
 - [ ] Fontes bitmap do Mac guardadas na pilha (recursos FONT/NFNT), para o texto quebrar a linha no mesmo lugar que no Mac
@@ -57,7 +58,7 @@ dependem das outras mensagens do sistema.
 - [ ] `export paint` e `import paint`
 - [ ] Depurador: checkpoints, Message Watcher, Variable Watcher
 - [ ] Pacotes para Flatpak e outras distribuições
-- [ ] Outros compactadores do Mac: Compact Pro (.cpt), StuffIt X (.sitx) e os instaladores autoextraíveis (.sea)
+- [ ] StuffIt X (.sitx)
 
 ## Não planejado
 
