@@ -1989,6 +1989,47 @@ def sys_env(it, a):
     return "\x13Incorrect parameter"
 
 
+_FOLDERPATH_TYPES = {
+    "SYSTEM FOLDER": "macs", "APPLE MENU ITEMS": "amnu", "CONTROL PANELS": "ctrl",
+    "DESKTOP FOLDER": "desk", "EXTENSIONS": "extn", "PREFERENCES": "pref",
+    "PRINTMONITOR DOCUMENTS": "prnt", "TRASH": "trsh", "NETWORK TRASH": "empt",
+    "STARTUP ITEMS": "strt", "TEMPORARY ITEMS": "temp",
+}
+
+
+@xfcn("FolderPath")
+def folder_path(it, a):
+    """FolderPath(type, create) (Sudderth 1995, in Core Development Group's
+    stacks): the Mac path of a special folder, from FindFolder. Apple's
+    older FolderPath(prompt) asks the user for a folder instead."""
+    from .hthost import local_to_mac
+    a = [str(x) for x in a]
+    code = _ext_code(it, "FolderPath")
+    if b"Anup Murarka" in code:
+        # Apple's FolderPath 1.0/1.1 (Anup Murarka & Eric Carlson):
+        # FolderPath(prompt) lets the user pick a folder.
+        if a == ["!"]:
+            return "v1.1, ©1989, 1990 Apple Computer, Inc. by Anup Murarka & Eric Carlson" if b"v1.1" in code \
+                else "v1.0, ©1989 Apple Computer, Inc. Anup Murarka & Eric Carlson"
+        if a == ["?"]:
+            return "FolderPath(<promptString>)"
+        r = it.host.choose_file("folder", _arg(a, 0))
+        if not r:
+            return ""
+        sep = "/" if r.startswith("/") else ":"     # a folder outside HCX's keeps its Linux path
+        return r if r.endswith(sep) else r + sep
+    if len(a) != 2:
+        return "Syntax: FolderPath ( <type>, <create> )"
+    kind = _FOLDERPATH_TYPES.get(_ascii_upper(a[0]))
+    if kind is None:
+        return "Error: Unrecognized type."
+    vols = _volumes()
+    path = find_folder(vols[0], kind, a[1] == "TRUE") if vols else None
+    if path is None:
+        return ""
+    return local_to_mac(path) + ":"
+
+
 @xcmd("SetDepth", "HideDesktop", "ShowDesktop", "MaxMem", "Compact", "PurgeMem", "FlushMem")
 def max_mem(it, a):
     return None

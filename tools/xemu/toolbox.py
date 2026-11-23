@@ -721,6 +721,38 @@ def _bit_shift(tb, op):
     tb.ret32((v << count) if count >= 0 else (v >> -count))
 
 
+@tb_trap(0xA9EA)
+def _pack3(tb, op):
+    """Standard File. tools/xemu has no screen, so the user always clicks
+    Cancel (reply.good false), as HCX's headless host does."""
+    m = tb.m
+    sel = m.pop16()
+    if sel in (2, 4):           # SFGetFile / SFPGetFile
+        if sel == 4:
+            m.pop32()           # filterProc
+            m.pop16()           # dlgID
+        reply = m.pop32()
+        m.pop32()               # dlgHook
+        m.pop32()               # typeList
+        m.pop16()               # numTypes
+        m.pop32()               # fileFilter
+        m.pop32()               # prompt
+        m.pop32()               # where
+    elif sel in (1, 3):         # SFPutFile / SFPPutFile
+        if sel == 3:
+            m.pop32()
+            m.pop16()
+        reply = m.pop32()
+        m.pop32()               # dlgHook
+        m.pop32()               # origName
+        m.pop32()               # prompt
+        m.pop32()               # where
+    else:
+        raise Unimplemented("Pack3 selector %d" % sel)
+    m.w8(reply, 0)              # good
+    m.w8(reply + 1, 0)          # copy
+
+
 @tb_trap(0xA815)
 def _scsi_dispatch(tb, op):
     """The SCSI Manager of a Mac with nothing on its SCSI bus: selecting

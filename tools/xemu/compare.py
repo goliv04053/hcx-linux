@@ -56,6 +56,9 @@ class Host(HostMixin):
     def bg_of(self, card):
         return self.stack.bg_by_id(card.bg_id) if card else None
 
+    def go_index(self, i, effect=None):
+        self.index = i
+
     def answer(self, text, buttons):
         return buttons[0] if buttons else "OK"
 
