@@ -586,7 +586,8 @@ def _get_cat_info(tb, pb):
             real = os.path.realpath(path)
             mac = fm.vols[v] if real == os.path.realpath(fm.vol_path(v)) else os.path.basename(path)
             fm.put_name(pb, _to_mac_name(mac))
-    m.w16(pb + 22, fm.vol_of(path))
+    if idx <= 0:            # an indexed call leaves ioVRefNum alone
+        m.w16(pb + 22, fm.vol_of(path))
     fm.done(pb, _file_info(fm, m, pb, path, True))
 
 

@@ -1331,6 +1331,285 @@ def get_vinfo(it, a):
                      "false", "false", d, t, d, t])
 
 
+_GETDIR_OPS = ("=", "≠", ">", "<", "≥", "≤")
+
+
+def _getdir_help(ver, what):
+    v = "%d.%d" % ver
+    if what == "!":
+        if ver < (2, 0):
+            return "Version %s, © Frederic RINALDI 1990" % v
+        if ver >= (3, 0):
+            return "68K_GetDir %s, © Frederic RINALDI 1990…%s" % (v, "2000" if ver >= (3, 4) else "1998")
+        return "GetDir %s, © Frederic RINALDI 1990…%s" % (v, "1992" if ver < (2, 4) else "1994" if ver < (2, 8)
+                                                          else "1998")
+    if what == "=":
+        return "<entry 1>[…¶<entry N> WITH <entry>=<item 1>[…,<item N>]"
+    if ver < (2, 0):
+        return "GetDir(<pathName>[,<a|f|d[+]>][,<filter 1>...[,<filter N>]]"
+    if ver < (2, 4):
+        return 'GetDir(<pathName>[,<a|f|d[+]>][,<filter 1>[…,<filter N>]] WITH <filter>=' \
+               '"<b|c|d|e|f|l|m|n|o|r|s|t|x|y|z><=|≠|>|<|≥|≤><value>"'
+    if ver < (2, 8):
+        return 'GetDir(<pathName>[,«a|f|d[+]»][,«filter 1»[…,«filter N»]] WITH «filter»=' \
+               '"<b|c|d|e|f|i|l|m|n|o|r|s|t|x|y|z><=|≠|>|<|≥|≤><value>"'
+    if ver < (3, 4):
+        return 'GetDir(<pathName>[,«a|f|d[+]»][«AND|OR»][,«filter 1»[…,«filter N»]] WITH «filter»=' \
+               '"<b|c|d|e|f|i|l|m|n|o|r|s|t|x|y|z><=|≠|>|<|≥|≤><value%s>"' % ("1>[…|<valueN" if ver >= (3, 0) else "")
+    return 'GetDir(<pathName>[,«a|f|d[+]»][,«AND|OR»][,«busy cursor»][,«filter 1»[…,«filter N»]] WITH ' \
+           '«filter»="<b|c|d|e|f|i|l|m|n|o|r|s|t|x|y|z><=|≠|>|<|≥|≤><value1>[…|<valueN>]"'
+
+
+def _getdir_text(name):
+    return name.replace("\0", "[0]").replace("\r", "[13]").replace("\n", "[13]").replace(",", "[44]")
+
+
+def _str_test(op, have, want, fold):
+    if fold:
+        have, want = _ascii_upper(have), _ascii_upper(want)
+    return {"=": have == want, "≠": have != want, "<": have.startswith(want), ">": have.endswith(want),
+            "≥": want in have, "≤": want not in have}[op]
+
+
+def _num_test(op, have, want):
+    return {"=": have == want, "≠": have != want, "<": have < want, ">": have > want,
+            "≥": have >= want, "≤": have <= want}[op]
+
+
+@xfcn("GetDir")
+def get_dir(it, a):
+    """Frederic Rinaldi's GetDir 1.8 to 3.4: the files and folders of a
+    folder in HCX's folder for Mac files, filtered by kind, name, type,
+    creator, sizes, dates and visibility, with the items chosen by "o=".
+    Checked against the originals in tools/xemu, except the date filters
+    (the emulator can't read dates yet)."""
+    import time
+    from .hthost import local_to_mac
+    code = _ext_code(it, "GetDir")
+    ver = _rinaldi_version(code, "GetDir")
+    if ver == (0, 0):
+        ver = (2, 2) if not code else (1, 8)
+    v3 = ver >= (3, 0)
+    a = [str(x) for x in a]
+    first = a[0] if a else ""
+    if len(a) == 1 and first in ("!", "?") or (a == ["="] and ver >= (2, 0)):
+        return _getdir_help(ver, first)
+    if not a:
+        return "Error : Missing pathName" if ver < (2, 0) else "Error : Missing or empty pathName"
+    if not first and ver >= (2, 0):
+        return "Error : Missing or empty pathName"
+    # the kind of items and recursion
+    kind, recurse, rest = "a", False, a[1:]
+    if rest and rest[0][:1].lower() in ("a", "f", "d") and rest[0][1:2] not in _GETDIR_OPS:
+        kind, recurse, rest = rest[0][0].lower(), rest[0][1:2] == "+", rest[1:]
+    use_or = False
+    v18 = ver < (2, 0)
+    # 1.8 also takes "x" and "y" (times), though its error message doesn't say so
+    letters = "cdeflmnorstxy" if v18 else "bcdeflmnorstxyz" if ver < (2, 4) else "bcdefilmnorstxyz"
+    filters, mask = [], None
+    skip_empty = len(a) - len(rest)     # params 3 and later may be empty
+    for i, p in enumerate(rest):
+        if p == "" and i + skip_empty >= 2:
+            continue
+        low = p.lower()
+        if ver >= (2, 8) and low in ("and", "or"):
+            use_or = low == "or"
+            continue
+        if ver >= (3, 4) and low in ("true", "false"):
+            continue            # the busy cursor
+        key = low[:1]
+        if not key or key not in letters:
+            return "Error : First char of filter param must be [%s]" % ",".join(letters[:11] if v18 else letters)
+        op = p[1:2]
+        if op not in _GETDIR_OPS:
+            return "Error : Second char of filter param must be [=,≠,>,<,≥,≤]"
+        val = p[2:]
+        if not val:
+            return 'Error : Missing comparison value for "%s%s" test' % (key.upper(), op)
+        if v3 and (any(f[0] == key for f in filters) or key == "o" and mask is not None):
+            return 'Error : "%s" filter defined twice' % key.upper()
+        if key == "o":
+            if op != "=":
+                return 'Error : Only "o=…" allowed'
+            allowed = "cdeflmnprstvxy" + ("" if ver < (2, 0) else "bz")
+            for ch in val:
+                if ch.lower() not in allowed:
+                    return 'Error : "%s" not allowed in output mask' % ch.upper()
+            mask = val.lower()
+            continue
+        if key == "i":
+            if op not in ("=", "≠"):
+                return 'Error : Only "i=…" and "i≠…" allowed'
+            b = _bool_param(val)
+            if b is None:
+                return "Error : Incorrect boolean value"
+            filters.append(("i", op, b))
+            continue
+        if key in ("t", "c"):
+            vals = val.split("|") if v3 else [val]
+            what = "type" if key == "t" else "creator"
+            if ver < (2, 0) and len(val) != 4:
+                return "Error : Bad file " + what
+            if (2, 8) <= ver < (3, 0) and len(val) < 4:
+                return "Error : Incorrect file %s filter" % what
+            if ver == (2, 4):           # 2.4 upper-cases the value (only)
+                vals = [_ascii_upper(v) for v in vals]
+            filters.append((key, op, vals))
+            continue
+        if key in ("d", "r", "l", "s", "f"):
+            filters.append((key, op, int(ht.to_num(val)) if ht.is_number(val) else 0))
+            continue
+        if key == "n":
+            filters.append((key, op, val))
+            continue
+        if v18 and key in "xy":     # 1.8 reads "h:mm" itself, minutes only when plain digits
+            hm = val.split(":")
+            if len(hm) < 2 or not hm[0].strip().isdigit():
+                return "Error : Not a valid time"
+            t = (int(hm[0]), int(hm[1]) if hm[1].strip().isdigit() else 0)
+            filters.append((key, op, t))
+            continue
+        try:        # dates (b, e, m) and times (x, y, z)
+            t = ht._parse_date(val)
+        except ValueError:
+            return "Error : Not a valid %s" % ("time" if key in "xyz" else "date")
+        filters.append((key, op, t))
+    if not use_or:          # without "or" a later filter replaces an earlier one
+        filters = list({f[0]: f for f in filters}.values())
+    err, root = _mac_resolve(first if ":" in first else first + ":")
+    if not err and not os.path.lexists(root):
+        err = "fnf"
+    if err:
+        if ver < (2, 0) and err in ("dirnf", "fnf"):
+            return "Error : Directory not found"
+        if ver == (2, 5) and err == "fnf":
+            return "Error : Folder not found"
+        return "Error : " + _RINALDI_ERR[err]
+    if not os.path.isdir(root):
+        return "Error : Directory not found" if ver < (2, 0) else \
+            "Error : First param is not a volume or folder" if ver == (2, 5) else "Error : Not a folder"
+    def tree_sizes(path):
+        phys = logical = 0
+        for d, ds, fs in os.walk(path):
+            ds[:] = [n for n in ds if not n.startswith(".")]
+            for n in fs:
+                if not n.startswith("."):
+                    size = os.path.getsize(os.path.join(d, n))
+                    logical += size
+                    phys += (size + 511) // 512 * 512
+        return phys, logical
+
+    def info(path):
+        st = os.stat(path)
+        folder = os.path.isdir(path)
+        rec = {"folder": folder, "name": os.path.basename(path), "path": path, "mtime": st.st_mtime}
+        if folder:
+            names = [n for n in os.listdir(path) if not n.startswith(".")]
+            rec["f"] = len(names)
+            rec["s"], rec["l"] = tree_sizes(path)
+        else:
+            ftype, creator, flags = _finder_info(path)
+            rec.update(t=ftype.decode("mac_roman"), c=creator.decode("mac_roman"), d=st.st_size, r=0,
+                       l=st.st_size, s=(st.st_size + 511) // 512 * 512, flags=flags)
+        rec["invisible"] = bool(rec.get("flags", 0) & 0x4000)
+        return rec
+
+    def passes(rec):
+        results = []
+        for key, op, want in filters:
+            folder = rec["folder"]
+            if key == "i":
+                ok = (rec["invisible"] == want) == (op == "=")
+            elif key in ("t", "c", "d", "r"):
+                if folder:
+                    ok = not (v3 or v18)
+                elif key in ("t", "c") and v18:     # 1.8 compares the codes as numbers
+                    ok = _num_test(op, rec[key].encode("mac_roman"), want[0].encode("mac_roman"))
+                elif key in ("t", "c"):
+                    ok = any(_str_test(op, rec[key], w, False) for w in want) if op != "≠" or len(want) == 1 \
+                        else all(rec[key] != w for w in want)
+                else:
+                    ok = _num_test(op, rec[key], want)
+            elif key == "f":
+                ok = _num_test(op, rec["f"], want) if folder else ver >= (2, 4)
+            elif key in ("l", "s"):
+                ok = _num_test(op, rec[key], want)
+            elif key == "n" and v18 and op in ("≥", "≤"):
+                ok = op == "≤"      # 1.8's "contains" tests never match
+            elif key == "n":
+                ok = _str_test(op, rec["name"], want, True)
+            elif v18 and key in "xy":
+                lt = time.localtime(rec["mtime"])
+                ok = _num_test(op, (lt.tm_hour, lt.tm_min), want)
+            else:
+                stamp = rec["mtime"] if key in "emxy" else -2082844800 + time.timezone
+                if key in "bem":
+                    lt, wt = time.localtime(stamp), time.localtime(want)
+                    have, want2 = (lt.tm_year, lt.tm_yday), (wt.tm_year, wt.tm_yday)
+                else:
+                    lt, wt = time.localtime(stamp), time.localtime(want)
+                    have, want2 = (lt.tm_hour, lt.tm_min), (wt.tm_hour, wt.tm_min)
+                ok = _num_test(op, have, want2)
+            results.append(ok)
+        if not results:
+            return True
+        return any(results) if use_or else all(results)
+
+    if not v18:
+        text = _getdir_text
+    elif mask:      # 1.8 turns commas into semicolons, and only with "o="
+        def text(x):
+            return x.replace(",", ";")
+    else:
+        def text(x):
+            return x
+
+    def field(rec, ch):
+        folder = rec["folder"]
+        if ch == "n":
+            return text(rec["name"]) + (":" if folder else "")
+        if ch == "p":
+            return ":".join(text(x) for x in local_to_mac(rec["path"]).split(":")) + (":" if folder else "")
+        if ch in "ctdrv":
+            if folder:
+                return ""
+            return "unknown" if ch == "v" else text(rec[ch]) if ch in "ct" else str(rec[ch])
+        if ch == "f":
+            return str(rec["f"]) if folder else ""
+        if ch in "sl":
+            return str(rec[ch])
+        stamp = rec["mtime"] if ch in "emxy" else None
+        if ch in "bem":
+            return _mac_date(stamp, "date") if stamp is not None else "1/1/04"
+        secs = ":%S" if ver >= (3, 4) else ""
+        if stamp is None:
+            return "12:00%s AM" % (":00" if secs else "")
+        return time.strftime("%-I:%M" + secs + " %p", time.localtime(stamp))
+
+    out = []
+
+    def scan(folder):
+        try:
+            names = sorted((n for n in os.listdir(folder) if not n.startswith(".")), key=str.lower)
+        except OSError:
+            return
+        for n in names:
+            p = os.path.join(folder, n)
+            rec = info(p)
+            if (kind == "a" or (kind == "d") == rec["folder"]) and passes(rec):
+                if ver >= (2, 8) and not any(f[0] == "i" for f in filters) and rec["invisible"]:
+                    pass
+                else:
+                    out.append(",".join(field(rec, ch) for ch in (mask or "n")))
+            if recurse and rec["folder"]:
+                scan(p)
+
+    scan(root)
+    if ver < (2, 0):
+        return "".join(x + "\n" for x in out)
+    return "\n".join(out)
+
+
 @xcmd("SetFInfo", "SetFileInfo")
 def set_finfo(it, a):
     """Frederic Rinaldi's SetFInfo 1.0, 1.1 and 1.4: SetFInfo file

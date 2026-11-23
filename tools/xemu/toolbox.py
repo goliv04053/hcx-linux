@@ -1619,6 +1619,29 @@ def _get_mouse(tb, op):
     tb.m.w32(p, 0)
 
 
+@tb_trap(0xA971, 0xA970)
+def _event_avail(tb, op):
+    """EventAvail / GetNextEvent(mask, VAR event): no events (a null event)."""
+    m = tb.m
+    p = m.pop32()
+    m.pop16()
+    m.wbytes(p, bytes(16))
+    m.w32(p + 2, 0)
+    m.w32(p + 6, tb.ticks())
+    tb.ret_bool(False)
+
+
+@tb_trap(0xA866)
+def _stuff_hex(tb, op):
+    m = tb.m
+    s = m.pstr(m.pop32())
+    p = m.pop32()
+    try:
+        m.wbytes(p, bytes.fromhex(s.decode("latin-1")))
+    except ValueError:
+        pass
+
+
 @tb_trap(0xA976)
 def _get_keys(tb, op):
     p = tb.m.pop32()
@@ -1657,15 +1680,24 @@ def _pack4(tb, op):
     sane.pack4(tb)
 
 
+def _identical(a, b):
+    """IUMagIDString (IUEqualString): 0 when the strings are the same but
+    for case, else 1. Rinaldi's GetDir relies on the case: it upper-cases
+    its "n=" pattern and compares it with the names as they are."""
+    return 0 if _fold(a, False, True) == _fold(b, False, True) else 1
+
+
 @tb_trap(0xA9ED)
 def _pack6(tb, op):
     m = tb.m
     sel = m.pop16()
-    if sel in (0, 2):       # IUDateString(dateTime, form, VAR s) / IUTimeString(dateTime, wantSeconds, VAR s)
+    if sel in (0, 2, 14, 16):   # IUDate/TimeString(dateTime, form, VAR s[, intlHandle])
+        if sel >= 14:
+            m.pop32()
         out = m.pop32()
         form = m.pop16() >> 8
         t = time.gmtime(m.pop32() - MAC_EPOCH)
-        if sel == 0:
+        if sel in (0, 14):
             fmt = ("%-m/%-d/%y", "%A, %B %-d, %Y", "%a, %b %-d, %Y")[min(form, 2)]
         else:
             fmt = "%-I:%M:%S %p" if form else "%-I:%M %p"
@@ -1685,11 +1717,17 @@ def _pack6(tb, op):
         else:
             raise Unimplemented("IUGetIntl(%d)" % n)
         tb.ret32(m.heap.new_handle(len(data), data=data))
+    elif sel in (26, 28):     # IUMagPString / IUMagIDPString(..., intlParam)
+        m.pop32()
+        blen, alen = m.pops16(), m.pops16()
+        bp, ap = m.pop32(), m.pop32()
+        a, b = m.rbytes(ap, max(alen, 0)), m.rbytes(bp, max(blen, 0))
+        tb.ret16(_identical(a, b) if sel == 28 else _mag_compare(a, b) & 0xFFFF)
     elif sel in (10, 12):     # IUMagString / IUMagIDString(aPtr, bPtr, aLen, bLen)
         blen, alen = m.pops16(), m.pops16()
         bp, ap = m.pop32(), m.pop32()
         a, b = m.rbytes(ap, max(alen, 0)), m.rbytes(bp, max(blen, 0))
-        tb.ret16((0 if a == b else 1) if sel == 12 else _mag_compare(a, b) & 0xFFFF)
+        tb.ret16(_identical(a, b) if sel == 12 else _mag_compare(a, b) & 0xFFFF)
     else:
         raise Unimplemented("Pack6 selector %d" % sel)
 
