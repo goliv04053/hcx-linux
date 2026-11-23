@@ -12,7 +12,7 @@ the name of a stack inside it. CASES.json is a list of [NAME, [PARAM...]],
 or {"files": {"HD:Folder:File": "text", "HD:Empty:": null}, "cases": [...]}
 to put files in the sandbox first (both sides see the same files; each
 case starts from a fresh copy). A file can also be {"text": "...",
-"mtime": seconds since 1970} to give it a modification date.
+"mtime": seconds since 1970, "type": "INIT", "creator": "abcd"}.
 Run it from the top of the repository with the Python that has GTK (the
 stack is imported to a temporary folder first). Files the externals read
 or write go to a temporary sandbox, never to ~/.local/share/hcx. Globals the
@@ -129,8 +129,10 @@ def sandbox(files):
     os.makedirs(os.path.join(root, "HD"), exist_ok=True)
     for mac, text in files.items():
         p = mac_to_local(mac.rstrip(":"))
-        mtime = None
+        mtime = finder = None
         if isinstance(text, dict):
+            finder = (text.get("type", "TEXT") + text.get("creator", "ttxt")).encode("mac_roman") \
+                if "type" in text or "creator" in text else None
             text, mtime = text.get("text"), text.get("mtime")
         if text is None:
             os.makedirs(p, exist_ok=True)
@@ -138,6 +140,8 @@ def sandbox(files):
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "wb") as fh:
                 fh.write(text.encode("mac_roman", "replace"))
+        if finder:
+            os.setxattr(p, "user.hcx.finderinfo", finder)
         if mtime is not None:
             os.utime(p, (mtime, mtime))
 

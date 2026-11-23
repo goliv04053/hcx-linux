@@ -1095,6 +1095,42 @@ def _set_finder_info(path, ftype=None, creator=None):
         return False
 
 
+# FindFolder's folder types: (name, inside the System Folder, always there)
+FOLDERS = {
+    "macs": ("System Folder", False, True),
+    "extn": ("Extensions", True, True),
+    "ctrl": ("Control Panels", True, True),
+    "pref": ("Preferences", True, True),
+    "amnu": ("Apple Menu Items", True, True),
+    "strt": ("Startup Items", True, True),
+    "shdn": ("Shutdown Items", True, True),
+    "font": ("Fonts", True, True),
+    "prnt": ("PrintMonitor Documents", True, False),
+    "desk": ("Desktop Folder", False, True),
+    "trsh": ("Trash", False, True),
+    "empt": ("Trash", False, True),
+    "temp": ("Temporary Items", False, True),
+}
+
+
+def find_folder(vol, kind, create=False):
+    """FindFolder: the local path of a special folder on a volume (a
+    folder at the top of HCX's folder for Mac files), made if every
+    System 7 disk has it or if asked to; None if there is no such folder.
+    tools/xemu's Alias Manager uses this too."""
+    entry = FOLDERS.get(kind)
+    if entry is None:
+        return None
+    name, in_system, always = entry
+    path = os.path.join(_ci_match(vol, "System Folder") if in_system else vol, name)
+    path = _ci_match(os.path.dirname(path), name)
+    if not os.path.isdir(path):
+        if not (always or create):
+            return None
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
 def _ci_match(folder, name):
     """The entry of folder called name, in any case, as HFS finds it."""
     p = os.path.join(folder, name)
@@ -1864,6 +1900,93 @@ def get_mode(it, a):
         l, t, r, b = 0, 0, 640, 480
     depth = get_depth(it, [])
     return "C,%s,1,C,32,%d,%d" % (depth if v14 else "32", r - l, b - t)
+
+
+def _volumes():
+    """The volumes: folders at the top of HCX's folder for Mac files, HD first."""
+    from .hthost import files_root
+    root = files_root()
+    try:
+        names = [n for n in os.listdir(root) if not n.startswith(".") and os.path.isdir(os.path.join(root, n))]
+    except OSError:
+        names = []
+    return [os.path.join(root, n) for n in sorted(names, key=lambda n: (n.lower() != "hd", n.lower()))]
+
+
+def _hfs_blocks(path):
+    """(total, free) 32K blocks of a volume, at most 65535 like HFS."""
+    import shutil
+    try:
+        du = shutil.disk_usage(path)
+    except OSError:
+        return 0, 0
+    return min(du.total // 32768, 0xFFFF), min(du.free // 32768, 0xFFFF)
+
+
+@xfcn("SysENV")
+def sys_env(it, a):
+    """Brian Zuk's SysENV 2.2b1. HCX answers as a Mac IIci with System
+    7.5.5 (the Mac tools/xemu emulates). The words come from the stack's
+    STR# 9621 to 9626, as in the original, which prints numbers instead
+    (or nothing) when a stack lacks them."""
+    def strs(rid):
+        r = _find_resource(it, ("STR#",), rid)
+        return _str_list(r[3]) if r else []
+
+    def pick(rid, i, default):
+        lst = strs(rid)
+        return lst[i] if 0 <= i < len(lst) else default
+
+    misc = strs(9626)
+
+    def word(i):
+        return misc[i] if i < len(misc) else ""
+
+    a = [str(x) for x in a]
+    kind = a[0].lower() if a else None
+    if kind == "?":
+        return 'SysENV accepts up to 2 parameters.  0 parameters returns system info.  Passing "INITs/CDEVs", ' \
+               '"Screens", "Volumes", or "SCSI" as parameter 1 returns related info.'
+    if kind == "!":
+        return "SysENV 2.2b1 ©1989-1991 Brian Zuk, XNet™."
+    if kind is None:
+        return ",".join([pick(9621, 9 + 2, "9"), "7.5.5", pick(9622, 3, "3"), pick(9623, 1, "true"),
+                         pick(9624, 1, "true"), pick(9625, 2, "2"), "1", "0",
+                         misc[1] if len(misc) > 1 else "true", "64" + word(2)])
+    if kind == "screens":
+        try:
+            l, t, r, b = (int(v) for v in str(it.host.screen_rect()).split(","))
+        except Exception:  # noqa: BLE001
+            l, t, r, b = 0, 0, 640, 480
+        return "1,%d,%d,%d,%d\n%s,%s%s,%d%s%d" % (l, t + 20, r, b, word(4), get_depth(it, []), word(5),
+                                                   r - l, word(6), b - t)
+    if kind == "volumes":
+        vols = _volumes()
+        lines = [str(len(vols))]
+        for v in vols:
+            total, free = _hfs_blocks(v)
+            lines.append("%d%s,%d%s,%s" % (total * 32, word(7), free * 32, word(7), os.path.basename(v)))
+        return "\n".join(lines)
+    if kind == "scsi":
+        return ""           # nothing on the SCSI bus
+    if kind == "inits/cdevs":
+        # INITs are files with INIT resources; files here have no resource
+        # fork, so only control panels (type cdev) are found.
+        cdevs = []
+        vols = _volumes()
+        if vols:
+            for k in ("extn", "ctrl", "macs"):
+                folder = find_folder(vols[0], k)
+                try:
+                    names = sorted((n for n in os.listdir(folder) if not n.startswith(".")), key=str.lower)
+                except (OSError, TypeError):
+                    continue
+                for n in names:
+                    p = os.path.join(folder, n)
+                    if n != "System" and os.path.isfile(p) and _finder_info(p)[0] == b"cdev":
+                        cdevs.append(n)
+        return "," + ",".join(cdevs)
+    return "\x13Incorrect parameter"
 
 
 @xcmd("SetDepth", "HideDesktop", "ShowDesktop", "MaxMem", "Compact", "PurgeMem", "FlushMem")

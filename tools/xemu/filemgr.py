@@ -953,7 +953,23 @@ def _alias_dispatch(tb, op):
     ResolveAliasFile only checks that the file is there."""
     fm, m = _fm(tb), tb.m
     sel = m.d(0) & 0xFFFF
-    if sel == 0x0C:         # ResolveAliasFile(VAR spec, chains, VAR isFolder, VAR wasAliased)
+    if sel == 0:            # FindFolder(vRefNum, folderType, create, VAR vRefNum, VAR dirID)
+        dir_p = m.pop32()
+        vref_p = m.pop32()
+        create = m.pop16() >> 8
+        kind = m.pop32().to_bytes(4, "big").decode("mac_roman")
+        vref, _d = fm._vref_dir(m.pops16(), 0)
+        if vref not in fm.vols:             # kOnSystemDisk, or another number: the first disk
+            vref = -1
+        from hcx.xcmds import find_folder
+        path = find_folder(fm.vol_path(vref), kind, create) if vref in fm.vols else None
+        if path is None:
+            err = fnfErr
+        else:
+            err = noErr
+            m.w16(vref_p, vref & 0xFFFF)
+            m.w32(dir_p, fm.dir_id(vref, path))
+    elif sel == 0x0C:       # ResolveAliasFile(VAR spec, chains, VAR isFolder, VAR wasAliased)
         was_p = m.pop32()
         folder_p = m.pop32()
         m.pop16()

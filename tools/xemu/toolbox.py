@@ -9,6 +9,7 @@ Anything else stops the external with Unimplemented, so the log says
 exactly what's missing."""
 
 import collections
+import os
 import time
 
 from . import sane
@@ -108,6 +109,13 @@ class Toolbox:
         m.w16(g + 20, 0x3C00 | 0x8000 | 1)  # gdFlags: main screen, active, screen device, colour
         m.w32(g + 30, 0)                    # gdNextGD
         self.gdevice = gd
+        rgn = self.heap.new_handle(10, clear=True)
+        r_p = self.heap.deref(rgn)
+        m.w16(r_p, 10)                      # the desktop: the screen below the menu bar
+        for i, v in enumerate((t + 20, l, b, r)):
+            m.w16(r_p + 2 + 2 * i, v)
+        m.w32(0x9EE, rgn)                   # GrayRgn
+        m.w16(0xBAA, 20)                    # MBarHeight
         m.w32(0x8A4, gd)                    # MainDevice
         m.w32(0x8A8, gd)                    # DeviceList
         m.w32(0xCC8, gd)                    # TheGDevice
@@ -713,6 +721,23 @@ def _bit_shift(tb, op):
     tb.ret32((v << count) if count >= 0 else (v >> -count))
 
 
+@tb_trap(0xA815)
+def _scsi_dispatch(tb, op):
+    """The SCSI Manager of a Mac with nothing on its SCSI bus: selecting
+    any device fails with scCommErr."""
+    m = tb.m
+    sel = m.pop16()
+    if sel in (0, 1):           # SCSIReset, SCSIGet
+        tb.ret16(0)
+    elif sel in (2, 11):        # SCSISelect / SCSISelAtn(targetID)
+        m.pop16()
+        tb.ret16(2)
+    elif sel == 10:             # SCSIStat
+        tb.ret16(0)
+    else:
+        raise Unimplemented("SCSIDispatch selector %d" % sel)
+
+
 @tb_trap(0xAAA2)
 def _palette_dispatch(tb, op):
     """HasDepth(gd, depth, whichFlags, flags): the screen takes every depth
@@ -893,6 +918,38 @@ def _load_resource(tb, op):
             if r[0] == rtype and r[1] == rid:
                 tb.heap.set_size(h, len(r[3]))
                 tb.m.wbytes(tb.heap.deref(h), r[3])
+    tb.res_err = noErr
+
+
+@tb_trap(0xA997, 0xA9C4, 0xA81A)
+def _open_res_file(tb, op):
+    """OpenResFile, OpenRFPerm and HOpenResFile. Files in the sandbox have
+    no resource fork, so this fails like opening an empty one (eofErr), or
+    with fnfErr when there is no such file."""
+    from . import filemgr
+    m = tb.m
+    k = op & 0x3FF
+    dirid, vref = 0, 0
+    if k == 0x1C4:          # OpenRFPerm(name, vRefNum, permission)
+        m.pop16()
+        vref = m.pops16()
+        name_p = m.pop32()
+    elif k == 0x01A:        # HOpenResFile(vRefNum, dirID, name, permission)
+        m.pop16()
+        name_p = m.pop32()
+        dirid = m.pop32()
+        vref = m.pops16()
+    else:
+        name_p = m.pop32()
+    fm = filemgr._fm(tb)
+    err, path, _v = fm.resolve(vref, dirid, m.pstr(name_p))
+    tb.res_err = err or (-39 if os.path.isfile(path) else filemgr.fnfErr)
+    tb.ret16(-1)
+
+
+@tb_trap(0xA99A)
+def _close_res_file(tb, op):
+    tb.m.pop16()
     tb.res_err = noErr
 
 
