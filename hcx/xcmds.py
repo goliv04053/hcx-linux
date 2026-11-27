@@ -1365,9 +1365,10 @@ def _file_copy(it, a):
     """Frederic Rinaldi's FileCopy 1.2 to 4.0: copies a file of HCX's
     folder for Mac files (with its type and creator) to another name or
     folder; "the result" is the copy's path (empty in 1.x) or an error.
-    Checked against the originals in tools/xemu. Two bugs are left out on
-    purpose: 2.7 and later empty a file copied onto itself with replace
-    true, and 1.3 adds the file's name to an existing destination file."""
+    Checked against the originals in tools/xemu. One bug is left out on
+    purpose: 1.2, 2.7 and later empty a file copied onto itself with
+    replace true; here the file stays as it is. (1.3's habit of adding the
+    file's name to a destination file that exists is kept.)"""
     import shutil
     from .hthost import local_to_mac
     code = _ext_code(it, "FileCopy")
