@@ -289,7 +289,7 @@ def _hfs(op):
     return bool(op & 0x0200)
 
 
-def _open(tb, op, rsrc):
+def _open(tb, op, rsrc, deny=False):
     fm, m = _fm(tb), tb.m
     pb = m.a(0)
     dirid = m.r32(pb + 48) if _hfs(op) else 0
@@ -299,6 +299,8 @@ def _open(tb, op, rsrc):
     if not os.path.isfile(path):
         return fm.done(pb, fnfErr)
     perm = m.r8(pb + 27)
+    if deny:        # ioDenyModes: 1 read, 2 write (and deny bits we don't model)
+        perm = {0: 0, 1: 1, 2: 2, 3: 3}[perm & 3]
     write = perm in (0, 2, 3, 4)
     for ref, f in fm.fcbs.items():
         if f.path == path and f.rsrc == rsrc and f.write and perm in (2, 3):
@@ -642,7 +644,7 @@ def _vol_info(tb, op):
     m.w32(pb + 52, blk)                         # ioVClpSiz
     m.w16(pb + 56, 0)                           # ioAlBlSt
     m.w32(pb + 58, 1000)                        # ioVNxtCNID
-    m.w16(pb + 62, min(du.free // blk, 0xFFFF))  # ioVFrBlk
+    m.w16(pb + 62, min(du.free // blk, 0x7FFF))  # ioVFrBlk: old code reads it as signed
     if _hfs(op):
         m.w16(pb + 64, 0x4244)                  # ioVSigWord 'BD'
         m.w16(pb + 66, 1)                       # ioVDrvInfo
@@ -856,6 +858,8 @@ def _hfs_dispatch(tb, op):
         return fm.done(pb, noErr)
     if sel == 0x1A:         # OpenDF
         return _open(tb, op | 0x200, False)
+    if sel in (0x38, 0x39):     # OpenDeny, OpenRFDeny
+        return _open(tb, op | 0x200, sel == 0x39, deny=True)
     if sel == 0x1B:         # MakeFSSpec
         name = fm.name_at(pb)
         err, path, v = fm.resolve(m.s16(pb + 22), m.r32(pb + 48), name)

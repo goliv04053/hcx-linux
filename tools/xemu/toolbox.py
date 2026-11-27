@@ -10,6 +10,7 @@ exactly what's missing."""
 
 import collections
 import os
+import struct
 import time
 
 from . import sane
@@ -387,6 +388,16 @@ def _mem_noop(tb, op):
 @os_trap(0xA01C)
 def _free_mem(tb, op):
     tb.m.set_d(0, tb.heap.free_bytes())
+
+
+@os_trap(0xA032)
+def _flush_events(tb, op):
+    tb.m.set_d(0, 0)
+
+
+@os_trap(0xA061)
+def _max_block(tb, op):
+    tb.m.set_d(0, tb.heap.max_block())
 
 
 @os_trap(0xA01D)
@@ -1190,6 +1201,148 @@ def _get_font_info(tb, op):
         tb.m.w16(p + 2 * i, v)
 
 
+@tb_trap(0xA870, 0xA871)
+def _local_global(tb, op):
+    """LocalToGlobal and GlobalToLocal, from the port's bounds."""
+    m = tb.m
+    p = m.pop32()
+    port = _port(tb)
+    top, left = m.s16(port + 8), m.s16(port + 10)
+    sign = 1 if op & 0x3FF == 0x71 else -1
+    m.w16(p, (m.s16(p) + sign * top) & 0xFFFF)
+    m.w16(p + 2, (m.s16(p + 2) + sign * left) & 0xFFFF)
+
+
+# -- windows and dialogs: just enough for progress windows -----------------------------------------
+
+def _new_window_record(tb, storage, bounds, visible, refcon, kind, items=0):
+    """A WindowRecord (or DialogRecord) whose port maps local to global
+    coordinates; nothing is drawn."""
+    m = tb.m
+    w = storage or m.heap.new_ptr(200, clear=True)
+    m._init_port(w)
+    top, left, bottom, right = bounds
+    for i, v in enumerate((-top, -left, 480 - top, 640 - left)):
+        m.w16(w + 8 + 2 * i, v & 0xFFFF)            # portBits.bounds
+    for i, v in enumerate((0, 0, bottom - top, right - left)):
+        m.w16(w + 16 + 2 * i, v & 0xFFFF)           # portRect
+    m.w16(w + 108, kind)                            # windowKind
+    m.w8(w + 110, 1 if visible else 0)              # visible
+    m.w32(w + 152, refcon)                          # refCon
+    if kind == 2:
+        m.w32(w + 156, items)                       # items
+    return w
+
+
+def _pop_window_args(tb):
+    m = tb.m
+    refcon = m.pop32()
+    m.pop16()                   # goAwayFlag
+    m.pop32()                   # behind
+    m.pop16()                   # procID
+    visible = m.pop16() >> 8
+    m.pop32()                   # title
+    bounds = _rd_rect(m, m.pop32())
+    storage = m.pop32()
+    return storage, bounds, visible, refcon
+
+
+@tb_trap(0xA913, 0xAA45)
+def _new_window(tb, op):
+    """NewWindow and NewCWindow."""
+    storage, bounds, visible, refcon = _pop_window_args(tb)
+    tb.ret32(_new_window_record(tb, storage, bounds, visible, refcon, 8))
+
+
+@tb_trap(0xA97D, 0xAA4B)
+def _new_dialog(tb, op):
+    """NewDialog and NewColorDialog."""
+    items = tb.m.pop32()
+    storage, bounds, visible, refcon = _pop_window_args(tb)
+    tb.ret32(_new_window_record(tb, storage, bounds, visible, refcon, 2, items))
+
+
+@tb_trap(0xA97C)
+def _get_new_dialog(tb, op):
+    m = tb.m
+    m.pop32()                   # behind
+    storage = m.pop32()
+    rid = m.pops16()
+    f, r = tb.find_res(b"DLOG", rid)
+    if r is None:
+        tb.res_err = resNotFound
+        return tb.ret32(0)
+    d = r[3]
+    bounds = list(struct.unpack(">4h", d[:8]))
+    items = tb.get_resource(b"DITL", struct.unpack(">h", d[18:20])[0])
+    if items:
+        data = bytes(m.rbytes(tb.heap.deref(items), tb.heap.size(items)))
+        items = tb.heap.new_handle(len(data), data=data)
+    tb.ret32(_new_window_record(tb, storage, bounds, d[10], struct.unpack(">i", d[14:18])[0], 2, items))
+
+
+def _ditl_items(m, heap, h):
+    """[(type, rect, data)] of a DITL handle."""
+    if not h or not heap.is_handle(h):
+        return []
+    d = bytes(m.rbytes(heap.deref(h), heap.size(h)))
+    out, pos = [], 2
+    for _i in range(struct.unpack(">h", d[:2])[0] + 1 if len(d) >= 2 else 0):
+        if pos + 14 > len(d):
+            break
+        rect = d[pos + 4:pos + 12]
+        typ, n = d[pos + 12], d[pos + 13]
+        out.append((typ, rect, d[pos + 14:pos + 14 + n]))
+        pos += 14 + n + (n & 1)
+    return out
+
+
+@tb_trap(0xA98D)
+def _get_ditem(tb, op):
+    m = tb.m
+    box, item, typ = m.pop32(), m.pop32(), m.pop32()
+    n = m.pops16()
+    dlg = m.pop32()
+    items = _ditl_items(m, tb.heap, m.r32(dlg + 156)) if dlg else []
+    if 1 <= n <= len(items):
+        t, rect, data = items[n - 1]
+        m.w16(typ, t)
+        m.wbytes(box, rect)
+        m.w32(item, tb.heap.new_handle(len(data), data=data) if t & 0x7F in (8, 16) else 0)
+    else:
+        m.w16(typ, 0)
+        m.w32(item, 0)
+        m.wbytes(box, bytes(8))
+
+
+@tb_trap(0xA990)
+def _get_itext(tb, op):
+    m = tb.m
+    s = m.pop32()
+    h = m.pop32()
+    data = bytes(m.rbytes(tb.heap.deref(h), tb.heap.size(h)))[:255] if h and tb.heap.is_handle(h) else b""
+    m.wpstr(s, data)
+
+
+@tb_trap(0xA917)
+def _get_wrefcon(tb, op):
+    w = tb.m.pop32()
+    tb.ret32(tb.m.r32(w + 152) if w else 0)
+
+
+@tb_trap(0xA918)
+def _set_wrefcon(tb, op):
+    v = tb.m.pop32()
+    w = tb.m.pop32()
+    if w:
+        tb.m.w32(w + 152, v)
+
+
+@tb_trap(0xA924)
+def _front_window(tb, op):
+    tb.ret32(0)
+
+
 @tb_trap(0xA874)
 def _get_port(tb, op):
     p = tb.m.pop32()
@@ -1241,6 +1394,7 @@ _NOOPS = {
     0xA89B: 2, 0xA89C: 4, 0xA89D: 0, 0xA89E: 0, 0xA89F: 8,              # PenMode PenPat PenNormal ...
     0xA9B4: 0, 0xA9F1: 4, 0xA9F0: 0,                                     # SystemTask UnloadSeg
     0xA903: 2, 0xA8FE: 0,                                                # SetFontLock InitFonts
+    0xA862: 4, 0xA863: 4,                                                # ForeColor BackColor
 }
 
 
@@ -1251,6 +1405,15 @@ def _noop_factory(nbytes):
 
 
 for _t, _n in _NOOPS.items():
+    _TB[_t & 0x3FF] = _noop_factory(_n)
+
+
+for _t, _n in {0xA914: 4, 0xA92D: 4, 0xA915: 4, 0xA916: 4, 0xA91F: 4, 0xA920: 4, 0xA91A: 8,
+               0xA922: 4, 0xA923: 4, 0xA928: 4, 0xA92A: 4, 0xA969: 4, 0xA981: 4, 0xA982: 4,
+               0xA983: 4, 0xA98E: 16, 0xA98F: 8, 0xA9CE: 14, 0xA904: 4, 0xA927: 4}.items():
+    # DisposeWindow CloseWindow ShowWindow HideWindow SelectWindow BringToFront SetWTitle
+    # BeginUpdate EndUpdate InvalRect ValidRect DrawControls DrawDialog CloseDialog
+    # DisposeDialog SetDItem SetIText TextBox DrawGrowIcon InvalRgn
     _TB[_t & 0x3FF] = _noop_factory(_n)
 
 
@@ -1619,10 +1782,14 @@ def _get_mouse(tb, op):
     tb.m.w32(p, 0)
 
 
-@tb_trap(0xA971, 0xA970)
+@tb_trap(0xA971, 0xA970, 0xA860)
 def _event_avail(tb, op):
-    """EventAvail / GetNextEvent(mask, VAR event): no events (a null event)."""
+    """EventAvail / GetNextEvent(mask, VAR event) and WaitNextEvent(mask,
+    VAR event, sleep, mouseRgn): no events (a null event)."""
     m = tb.m
+    if op & 0x3FF == 0x60:
+        m.pop32()
+        m.pop32()
     p = m.pop32()
     m.pop16()
     m.wbytes(p, bytes(16))
@@ -1640,6 +1807,14 @@ def _stuff_hex(tb, op):
         m.wbytes(p, bytes.fromhex(s.decode("latin-1")))
     except ValueError:
         pass
+
+
+@tb_trap(0xA86A, 0xA86B)
+def _hi_lo_word(tb, op):
+    """HiWord and LoWord."""
+    m = tb.m
+    x = m.pop32()
+    m.w16(m.sp, (x >> 16 if op & 0x3FF == 0x6A else x) & 0xFFFF)
 
 
 @tb_trap(0xA976)

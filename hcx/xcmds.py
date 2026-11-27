@@ -1319,7 +1319,7 @@ def get_vinfo(it, a):
     except OSError:
         return "Error : I/O Error"
     blk = 32768
-    total, free = min(du.total // blk, 0xFFFF), min(du.free // blk, 0xFFFF)
+    total, free = min(du.total // blk, 0xFFFF), min(du.free // blk, 0x7FFF)
     unit = 1 if ver == (1, 2) else 1024
     files = dirs = 0
     for _d, ds, fs in os.walk(vol):
@@ -2193,13 +2193,14 @@ def _volumes():
 
 
 def _hfs_blocks(path):
-    """(total, free) 32K blocks of a volume, at most 65535 like HFS."""
+    """(total, free) 32K blocks of a volume, at most 65535 like HFS; free
+    blocks stop at 32767 because many old externals read them as signed."""
     import shutil
     try:
         du = shutil.disk_usage(path)
     except OSError:
         return 0, 0
-    return min(du.total // 32768, 0xFFFF), min(du.free // 32768, 0xFFFF)
+    return min(du.total // 32768, 0xFFFF), min(du.free // 32768, 0x7FFF)
 
 
 @xfcn("SysENV")
