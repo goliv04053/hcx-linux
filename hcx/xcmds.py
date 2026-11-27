@@ -1331,6 +1331,144 @@ def get_vinfo(it, a):
                      "false", "false", d, t, d, t])
 
 
+_FILECOPY_YEARS = {(1, 3): "1990,1991", (2, 0): "1990…1992", (2, 6): "1990…1992", (2, 7): "1990…1994",
+                   (3, 1): "1990…1994", (3, 2): "1990…1995", (3, 7): "1990…1997", (3, 8): "1990…1998",
+                   (4, 0): "1990…1999"}
+
+
+def _filecopy_help(ver, what):
+    if what == "!":
+        if ver < (1, 3):
+            return "Version %d.%d, © Frederic RINALDI 1990" % ver
+        years = _FILECOPY_YEARS.get(ver) or ("1990…1999" if ver >= (4, 0) else "1990…1998")
+        return "%sFileCopy %d.%d, © Frederic RINALDI %s" % (("68K_" if ver >= (4, 0) else "",) + ver + (years,))
+    if ver < (1, 3):
+        return "FileCopy <file path or name> [,<dest path or name>][,<replace>]"
+    if ver < (2, 0):
+        return 'FileCopy <file path, name or pathname> [,<dest path or name>][,<replace>][,"DontResolveAlias"]'
+    if ver < (2, 6):
+        return 'FileCopy <prov file> [,<dest path or name>][,<replace>][,"DontResolveAlias"]'
+    if ver < (2, 7):
+        return 'FileCopy <prov file> [,<dest path or name>][,<replace>][,"DontResolveAlias"][,"DontShowProgress"]'
+    return 'FileCopy <prov file> [,«dest path or name»][,«replace»][,«"DontResolveAlias"»][,' \
+           '«"DontShowProgress"»][,«"DontResolveDestAlias"»]'
+
+
+@xcmd("FileCopy")
+def file_copy(it, a):
+    r = _file_copy(it, a)
+    if r:
+        it.result = r
+
+
+def _file_copy(it, a):
+    """Frederic Rinaldi's FileCopy 1.2 to 4.0: copies a file of HCX's
+    folder for Mac files (with its type and creator) to another name or
+    folder; "the result" is the copy's path (empty in 1.x) or an error.
+    Checked against the originals in tools/xemu. Two bugs are left out on
+    purpose: 2.7 and later empty a file copied onto itself with replace
+    true, and 1.3 adds the file's name to an existing destination file."""
+    import shutil
+    from .hthost import local_to_mac
+    code = _ext_code(it, "FileCopy")
+    ver = _rinaldi_version(code, "FileCopy")
+    if ver == (0, 0):
+        ver = (4, 0)
+    v12 = ver < (1, 3)
+    a = [str(x) for x in a]
+    if a in (["!"], ["?"]):
+        return _filecopy_help(ver, a[0])
+
+    def err(key):
+        if v12:
+            key = {"dirnf": "Directory not found", "dup": "Duplicate file name"}.get(key, key)
+        return "Error : " + _RINALDI_ERR.get(key, key)
+
+    if not a or (not a[0] and not v12):
+        return "Error : Missing parameter(s)" if v12 else "Error : Missing or empty parameter(s)"
+    src_name = a[0]
+    # the other params: replace, flags and the destination
+    flags = ["dontresolvealias"] if ver >= (1, 3) else []
+    if ver >= (2, 6):
+        flags.append("dontshowprogress")
+    if ver >= (2, 7):
+        flags.append("dontresolvedestalias")
+    replace, dest = False, ""
+    if v12:
+        dest = a[1] if len(a) > 1 else ""
+        if dest.strip().lower() in ("true", "false"):      # FileCopy file, replace
+            replace, dest = dest.strip().lower() == "true", None
+        if len(a) > 2:
+            b = _bool_param(a[2])
+            if b is None:
+                return "Error : Replace param must be boolean"
+            replace = b
+    else:
+        for p in a[1:]:
+            low = p.strip().lower()
+            if low in ("true", "false"):
+                replace = low == "true"
+            elif low not in flags:
+                dest = p
+    if v12 and src_name.endswith(":"):
+        return "Error : First param must not end with colon"
+    if ":" not in src_name and ver < (2, 6):
+        return err("nsv" if v12 else "dirnf")
+    e, src = _mac_resolve(src_name)
+    if not e and src_name.endswith(":"):
+        e = "dirnf"
+    if e:
+        return err(e)
+    if not os.path.lexists(src) or _is_volume(src):
+        return err("fnf")
+    if os.path.isdir(src):
+        return err("fnf" if v12 else "notfile")
+    name = os.path.basename(src)
+    folder = os.path.dirname(src)
+    if not dest:
+        if v12 and dest is not None and len(a) > 1:
+            return err("dup")
+        target = os.path.join(folder, "Copy of " + name)
+    elif ":" not in dest:
+        target = _ci_match(folder, dest.replace("/", "_"))
+    else:
+        e, target = _mac_resolve(dest)
+        if e:
+            return err(e)
+        if dest.endswith(":"):
+            if not os.path.isdir(target):
+                return err("dirnf")
+            target = _ci_match(target, name)
+    if os.path.isdir(target):
+        if ver < (1, 3):
+            return err("dup")
+        if ver < (2, 0):
+            return err("notfile")
+        if ver < (2, 6):
+            return err("fnf")
+        target = _ci_match(target, name)
+    overwrite_in_place = (1, 3) <= ver < (2, 7)     # these write over the old data, no truncating
+    if os.path.lexists(target):
+        if ver < (2, 0) and not v12 and dest and not dest.endswith(":"):
+            target = target + name          # 1.3's way with an existing file named as the destination
+        elif not overwrite_in_place and not replace:
+            return err("dup")
+    same = os.path.lexists(target) and os.path.samefile(src, target)
+    try:
+        if not same:
+            if overwrite_in_place and os.path.isfile(target):
+                with open(src, "rb") as fi, open(target, "r+b") as fo:
+                    shutil.copyfileobj(fi, fo)
+            else:
+                shutil.copyfile(src, target)
+            shutil.copystat(src, target)
+        ftype, creator, _f = _finder_info(src)
+        _set_finder_info(target, ftype, creator)
+    except OSError:
+        return "Error : I/O Error"
+    return "" if ver < (2, 0) else local_to_mac(target)
+
+
 _GETDIR_OPS = ("=", "≠", ">", "<", "≥", "≤")
 
 
