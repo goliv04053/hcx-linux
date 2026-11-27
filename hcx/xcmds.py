@@ -1331,6 +1331,124 @@ def get_vinfo(it, a):
                      "false", "false", d, t, d, t])
 
 
+def _restext_help(ver, what):
+    if what == "!":
+        years = {(1, 1): "1889,1990,1991", (1, 4): "1889,1990,1991,1992", (2, 0): "1989…1993",
+                 (2, 3): "1989…1994"}.get(ver, "1989…1998")
+        return "ResText %d.%d, © Frederic RINALDI %s" % (ver + (years,))
+    if ver < (2, 0):
+        return 'ResText(<res type>,<res ID or name>[,<fileName>][,<stripCtrl>][,"DontResolveAlias"])'
+    return 'ResText(<res type>,<res ID or name>[,<fileName>][,<#nb>][,<stripCtrl>][,"hex"][,"DontResolveAlias"])'
+
+
+@xfcn("ResText")
+def res_text(it, a):
+    """Frederic Rinaldi's ResText 1.1 to 2.5: a resource as text, from the
+    stack's resources or from a file's resource fork (the "name.rsrc" file
+    HCX keeps next to a file, see macfiles). STR and STR# give their
+    strings one per line; 2.x takes "#n" for one string of a STR#, and
+    "hex". Control characters show as [n] (1.1 drops them) unless the
+    stripCtrl param is false. Checked against the originals in tools/xemu."""
+    import re
+    from .macfiles import _sidecar_rsrc
+    from .resources import parse_resource_fork
+    code = _ext_code(it, "ResText")
+    ver = _rinaldi_version(code, "ResText")
+    if ver == (0, 0):
+        ver = (2, 5)
+    v2 = ver >= (2, 0)
+    a = [str(x) for x in a]
+    if a in (["!"], ["?"]):
+        return _restext_help(ver, a[0])
+    if len(a) < 2 or not a[0] or not a[1]:
+        return "Error : Missing or empty parameter(s)"
+    rtype = a[0]
+    if len(rtype) != 4:
+        return "Error : Bad resource type"
+    strip, hexa, nb, fname = True, False, None, None
+    for p in a[2:]:
+        low = p.strip().lower()
+        if low in ("true", "false"):
+            strip = low == "true"
+        elif low == "dontresolvealias":
+            pass
+        elif v2 and low == "hex":
+            hexa = True
+        elif v2 and p.startswith("#"):
+            nb = p[1:]
+        else:
+            fname = p
+    if fname:
+        err, path = _mac_resolve(fname)
+        if not err and not os.path.lexists(path):
+            err = "fnf"
+        if err:
+            return "Error : " + _RINALDI_ERR[err]
+        if os.path.isdir(path):
+            return "Error : Not a file"
+        res = parse_resource_fork(_sidecar_rsrc(path))
+        if not res:
+            return "Error : No resource fork"
+        chain = [res]
+    else:
+        try:
+            chain = it.host.resource_chain()
+        except Exception:  # noqa: BLE001
+            chain = []
+    key = a[1]
+    by_id = re.fullmatch(r"[+-]?\d+", key) is not None
+    found = None
+    for res in chain:
+        for r in res:
+            if r[0] == rtype and (r[1] == int(key) if by_id else r[2].lower() == key.lower()):
+                found = r
+                break
+        if found:
+            break
+    if found is None:
+        return "Error : Resource not found"
+    data = bytes(found[3])
+    if ver >= (1, 4) and rtype in ("STR ", "STR#"):
+        items = []
+        if rtype == "STR ":
+            items.append(data[1:1 + data[0]] if data else b"")
+        else:
+            n, pos = int.from_bytes(data[:2], "big") if len(data) >= 2 else 0, 2
+            for _i in range(n):
+                if pos >= len(data):
+                    break
+                items.append(data[pos + 1:pos + 1 + data[pos]])
+                pos += 1 + data[pos]
+            if v2 and nb is not None:
+                if not re.fullmatch(r"\d+", nb) or int(nb) < 1:
+                    return "Error : Incorrect STR# item number"
+                if int(nb) > len(items):
+                    return "Error : Index is out of range"
+                items = [items[int(nb) - 1]]
+        is_item = True
+    else:
+        items, is_item = [data], False
+
+    def text(b):
+        out = []
+        for c in b:
+            if c == 0:
+                if v2 or ver >= (1, 4):
+                    out.append("[0]")
+            elif c == 13:
+                out.append("[13]" if is_item and v2 else "\n")
+            elif (c < 32 or c >= 254) and strip:
+                if ver >= (1, 4):
+                    out.append("[%d]" % c)
+            else:
+                out.append(bytes([c]).decode("mac_roman"))
+        return "".join(out)
+
+    if hexa:
+        return "\n".join(" ".join("%02X" % c for c in b) for b in items)
+    return "\n".join(text(b) for b in items)
+
+
 _FILECOPY_YEARS = {(1, 3): "1990,1991", (2, 0): "1990…1992", (2, 6): "1990…1992", (2, 7): "1990…1994",
                    (3, 1): "1990…1994", (3, 2): "1990…1995", (3, 7): "1990…1997", (3, 8): "1990…1998",
                    (4, 0): "1990…1999"}

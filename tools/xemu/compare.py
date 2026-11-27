@@ -124,16 +124,45 @@ def _finder(path):
     return b" {finder info %r}" % v[:8]
 
 
+def resource_fork(entries):
+    """A resource fork from [(type, id, name, data)]."""
+    import struct
+    types = {}
+    for t, rid, name, data in entries:
+        types.setdefault(t, []).append((rid, name, data))
+    datas, names, refs, tl = b"", b"", b"", b""
+    nt = len(types)
+    ref_off = 2 + 8 * nt
+    for t, items in types.items():
+        tl += t.encode("mac_roman") + struct.pack(">HH", len(items) - 1, ref_off + len(refs))
+        for rid, name, data in items:
+            noff = -1
+            if name:
+                noff = len(names)
+                nb = name.encode("mac_roman")
+                names += bytes([len(nb)]) + nb
+            refs += struct.pack(">hhI", rid, noff, len(datas) & 0xFFFFFF) + b"\0\0\0\0"
+            datas += struct.pack(">I", len(data)) + data
+    type_list = struct.pack(">H", (nt - 1) & 0xFFFF) + tl + refs
+    rmap = bytes(16) + bytes(4) + bytes(2) + bytes(2) + struct.pack(">HH", 28, 28 + len(type_list))
+    rmap += type_list + names
+    head = struct.pack(">IIII", 256, 256 + len(datas), len(datas), len(rmap))
+    return head + bytes(240) + datas + rmap
+
+
 def sandbox(files):
-    """Fresh sandbox contents. Returns a snapshot function."""
+    """Fresh sandbox contents. Returns a snapshot function. A file is text,
+    or a dict with text, type, creator, mtime and rsrc ([type, id, name,
+    text] items for a resource fork next to it, as "name.rsrc")."""
     from hcx.hthost import files_root, mac_to_local
     root = files_root()
     shutil.rmtree(root, ignore_errors=True)
     os.makedirs(os.path.join(root, "HD"), exist_ok=True)
     for mac, text in files.items():
         p = mac_to_local(mac.rstrip(":"))
-        mtime = finder = None
+        mtime = finder = rsrc = None
         if isinstance(text, dict):
+            rsrc = text.get("rsrc")
             finder = (text.get("type", "TEXT") + text.get("creator", "ttxt")).encode("mac_roman") \
                 if "type" in text or "creator" in text else None
             text, mtime = text.get("text"), text.get("mtime")
@@ -143,6 +172,11 @@ def sandbox(files):
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "wb") as fh:
                 fh.write(text.encode("mac_roman", "replace"))
+        if rsrc is not None:
+            with open(p + ".rsrc", "wb") as fh:
+                fh.write(resource_fork([(t, rid, n, bytes.fromhex(d[4:]) if isinstance(d, str) and d.startswith("hex:")
+                                        else d.encode("mac_roman") if isinstance(d, str) else bytes(d))
+                                        for t, rid, n, d in rsrc]))
         if finder:
             os.setxattr(p, "user.hcx.finderinfo", finder)
         if mtime is not None:

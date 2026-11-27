@@ -58,6 +58,7 @@ class Toolbox:
         self.res_handles = {}       # (file, type, id) -> handle
         self.handle_res = {}        # handle -> (file, type, id, name)
         self.files = self._res_files()
+        self.order = sorted(f for f in self.files if f) + [0]     # search order, newest first
         self.t0 = time.monotonic()
         self.log = it.host.log if it is not None else (lambda *_a: None)
         self._screen()
@@ -166,7 +167,20 @@ class Toolbox:
     def search_files(self, one):
         if one:
             return [self.cur_res]
-        return [f for f in sorted(self.files) if f >= self.cur_res or f == 0] if self.cur_res else [0]
+        if self.cur_res not in self.order:
+            return [0]
+        return self.order[self.order.index(self.cur_res):]
+
+    def open_res_file(self, res):
+        """Adds an opened file's resources in front of the chain; its refNum."""
+        ref = max(self.files) + 1
+        while ref in (2, 3):        # keep clear of the stacks HyperCard has in use
+            ref += 1
+        ref = max(ref, 100)
+        self.files[ref] = list(res)
+        self.order.insert(0, ref)
+        self.cur_res = ref
+        return ref
 
     def find_res(self, rtype, rid=None, name=None, one=False):
         for f in self.search_files(one):
@@ -966,9 +980,10 @@ def _load_resource(tb, op):
 
 @tb_trap(0xA997, 0xA9C4, 0xA81A)
 def _open_res_file(tb, op):
-    """OpenResFile, OpenRFPerm and HOpenResFile. Files in the sandbox have
-    no resource fork, so this fails like opening an empty one (eofErr), or
-    with fnfErr when there is no such file."""
+    """OpenResFile, OpenRFPerm and HOpenResFile. A file of the sandbox has
+    the resource fork HCX reads for it (a "name.rsrc" file next to it, see
+    hcx.macfiles); without one, opening fails like for an empty fork
+    (eofErr), or with fnfErr when there is no such file."""
     from . import filemgr
     m = tb.m
     k = op & 0x3FF
@@ -986,13 +1001,33 @@ def _open_res_file(tb, op):
         name_p = m.pop32()
     fm = filemgr._fm(tb)
     err, path, _v = fm.resolve(vref, dirid, m.pstr(name_p))
+    if not err and os.path.isfile(path):
+        from hcx.macfiles import _sidecar_rsrc
+        from hcx.resources import parse_resource_fork
+        res = parse_resource_fork(_sidecar_rsrc(path))
+        if res:
+            for ref, entries in tb.files.items():       # already open: the same refNum
+                if ref >= 100 and getattr(tb, "res_paths", {}).get(ref) == path:
+                    tb.cur_res = ref
+                    tb.res_err = noErr
+                    return tb.ret16(ref)
+            ref = tb.open_res_file(res)
+            tb.res_paths = getattr(tb, "res_paths", {})
+            tb.res_paths[ref] = path
+            tb.res_err = noErr
+            return tb.ret16(ref)
     tb.res_err = err or (-39 if os.path.isfile(path) else filemgr.fnfErr)
     tb.ret16(-1)
 
 
 @tb_trap(0xA99A)
 def _close_res_file(tb, op):
-    tb.m.pop16()
+    ref = tb.m.pops16()
+    if ref >= 100 and ref in tb.files:
+        del tb.files[ref]
+        tb.order.remove(ref)
+        if tb.cur_res == ref:
+            tb.cur_res = tb.order[0]
     tb.res_err = noErr
 
 
@@ -1268,13 +1303,13 @@ def _get_new_dialog(tb, op):
     m.pop32()                   # behind
     storage = m.pop32()
     rid = m.pops16()
-    f, r = tb.find_res(b"DLOG", rid)
+    f, r = tb.find_res("DLOG", rid)
     if r is None:
         tb.res_err = resNotFound
         return tb.ret32(0)
     d = r[3]
     bounds = list(struct.unpack(">4h", d[:8]))
-    items = tb.get_resource(b"DITL", struct.unpack(">h", d[18:20])[0])
+    items = tb.get_resource("DITL", struct.unpack(">h", d[18:20])[0])
     if items:
         data = bytes(m.rbytes(tb.heap.deref(items), tb.heap.size(items)))
         items = tb.heap.new_handle(len(data), data=data)
