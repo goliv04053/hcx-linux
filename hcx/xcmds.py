@@ -1449,6 +1449,214 @@ def res_text(it, a):
     return "\n".join(text(b) for b in items)
 
 
+def _res_fork_of(path):
+    from .macfiles import _sidecar_rsrc
+    from .resources import parse_resource_fork
+    blob = _sidecar_rsrc(path)
+    return [list(r) for r in parse_resource_fork(blob)] if blob else None
+
+
+def _write_res_fork(path, res):
+    """Writes a file's resources to the "name.rsrc" HCX keeps next to it."""
+    from .resources import build_resource_fork
+    with open(path + ".rsrc", "wb") as fh:
+        fh.write(build_resource_fork([(t, rid, n, bytes(d)) for t, rid, n, d in res]))
+
+
+def _unique_res_id(res, rtype):
+    """A free ID for a new resource, as UniqueID would pick (at random)."""
+    import random
+    used = {r[1] for r in res if r[0] == rtype}
+    while True:
+        n = random.randint(1000, 32767)
+        if n not in used:
+            return n
+
+
+def _short_id(n):
+    return ((n + 0x8000) & 0xFFFF) - 0x8000
+
+
+def _copyres_apple(it, a, jay):
+    """Apple's CopyRes 1.1 (and Jay Hodgdon's 1.2, the same code): CopyRes
+    type, ID, source path, dest path. A missing destination is made. Apple's
+    gives the copy a free ID when its own is taken and returns the ID; Jay
+    Hodgdon's refuses and returns nothing."""
+    import re
+    copyright = "CopyRes XCMD 1.2 © 1990 by Jay Hodgdon" if jay else \
+        "CopyRes XCMD 1.1 © 1990, Apple Computer, Inc."
+    if len(a) == 1 and a[0] in ("!", "?"):
+        if a[0] == "?":
+            return "Form: CopyRes <ResType>,<res name>,<source pathname>, <dest pathname>"
+        return copyright if jay else "Copyright 1990 by Apple Computer, Inc.  All Rights Reserved"
+    if len(a) != 4:
+        return copyright
+    rtype, key, src, dst = a
+    os_err = {"nsv": -35, "dirnf": -120, "bdnam": -37}
+
+    def open_file(p):
+        err, path = _mac_resolve(p)
+        if err in os_err:
+            return "Error:  %d" % (os_err[err] & 0xFFFFFFFF), None
+        if err or not os.path.lexists(path) or os.path.isdir(path):
+            return "Error: file not found", None
+        return "", path
+
+    err, spath = open_file(src)
+    if err:
+        return err
+    sres = _res_fork_of(spath)
+    if sres is None:
+        return "Error:  source file not found"
+    err, dpath = _mac_resolve(dst)
+    if err in os_err:
+        return "Error:  %d" % (os_err[err] & 0xFFFFFFFF)
+    if err or os.path.isdir(dpath):
+        return "Error: file not found"
+    if not os.path.lexists(dpath):
+        open(dpath, "wb").close()
+        _set_finder_info(dpath, b"\0\0\0\0", b"\0\0\0\0")
+    m = re.fullmatch(r"\s*([+-]?\d+)\s*", key)
+    rid = _short_id(int(m.group(1))) if m else None
+    found = next((r for r in sres if r[0] == rtype and r[1] == rid), None)
+    if found is None:
+        return "Error:  resource not found"
+    dres = sres if os.path.realpath(dpath) == os.path.realpath(spath) else (_res_fork_of(dpath) or [])
+    if any(r[0] == rtype and r[1] == rid for r in dres):
+        if jay:
+            return "Error:  duplicate resource ID"
+        rid = _unique_res_id(dres, rtype)
+    dres.append([rtype, rid, found[2], bytes(found[3])])
+    _write_res_fork(dpath, dres)
+    return None if jay else str(rid)
+
+
+@xcmd("CopyRes")
+def copy_res(it, a):
+    """Frederic Rinaldi's CopyRes 2.0 to 2.4, and Apple's 1.1 (with Jay
+    Hodgdon's 1.2): copies a resource from one file's resource fork to
+    another's (the "name.rsrc" files HCX keeps next to files, see macfiles).
+    When the copy's name or ID is taken, Rinaldi's asks for another one, or
+    whether to replace the old resource, unless told what to do by the 5th
+    param. Checked against the originals in tools/xemu."""
+    a = [str(x) for x in a]
+    code = _ext_code(it, "CopyRes")
+    if b"Apple Computer" in code or b"Jay Hodgdon" in code:
+        r = _copyres_apple(it, a, b"Jay Hodgdon" in code)
+    else:
+        r = _copyres_rinaldi(it, a, _rinaldi_version(code, "CopyRes"))
+    if r is not None:
+        it.result = r
+
+
+def _copyres_rinaldi(it, a, ver):
+    import re
+    if ver == (0, 0):
+        ver = (2, 4)
+    if len(a) == 1 and a[0] in ("!", "?"):
+        if a[0] == "?":
+            return "CopyRes <prov file>,<dest file>,<res type>,<res name or ID>[,<I|R|K>]" \
+                   "[<duplicate name allowed>]"
+        years = "1992" if ver < (2, 1) else "1993" if ver < (2, 3) else "1998"
+        return "Version %d.%d, © Frederic RINALDI 1989…%s" % (ver + (years,))
+    if len(a) < 4:
+        return "Error : Missing parameter(s)"
+    src, dst, rtype, key = a[:4]
+    if len(rtype) != 4:
+        return "Error : Bad resource type"
+
+    def find(p):
+        err, path = _mac_resolve(p)
+        if not err and not os.path.lexists(path):
+            err = "fnf"
+        if not err and os.path.isdir(path):
+            err = "fnf" if ver < (2, 1) else "notfile"
+        return err, path
+
+    err, spath = find(src)
+    if err:
+        return "Error : " + _RINALDI_ERR[err]
+    mode = ""
+    if len(a) > 4:
+        mode = a[4].strip()[:1].upper()
+        if mode not in ("R", "I", "K"):
+            return "Error : Param 5 must begin with R[andom], I[ncrement], K[ill] or D[upName]"
+    dup_ok = len(a) > 5 and _bool_param(a[5]) is True
+    err, dpath = find(dst)
+    if err == "fnf" and ver >= (2, 4) and dpath and not os.path.lexists(dpath):
+        open(dpath, "wb").close()
+        _set_finder_info(dpath, b"\0\0\0\0", b"\0\0\0\0")
+        err = ""
+    if err:
+        return "Error : " + _RINALDI_ERR[err]
+    if os.path.realpath(spath) == os.path.realpath(dpath):
+        return "Error : Same dest and prov file"
+    sres = _res_fork_of(spath) or []
+    if re.fullmatch(r"-?\d+", key):
+        found = next((r for r in sres if r[0] == rtype and r[1] == int(key)), None)
+    else:
+        found = next((r for r in sres if r[0] == rtype and r[2].lower() == key.lower()), None)
+    if found is None:
+        return "Error : Resource not found"
+    dres = _res_fork_of(dpath) or []
+    rid, name, data = found[1], found[2], bytes(found[3])
+    aborted = "Error : Copy aborted"
+
+    def done(target):
+        if target is None:
+            dres.append([rtype, rid, name, data])
+            target = dres[-1]
+        else:
+            target[3] = data
+        _write_res_fork(dpath, dres)
+        return "%s,%d" % (target[2], target[1] & 0xFFFFFFFF if target[1] < 0 else target[1])
+
+    def named(n):
+        return next((r for r in dres if r[0] == rtype and r[2].lower() == n.lower()), None)
+
+    def with_id(n):
+        return next((r for r in dres if r[0] == rtype and r[1] == n), None)
+
+    host = it.host
+    if not dup_ok and named(name):     # an empty name counts too
+        if mode == "K":
+            return done(named(name))
+        while named(name):      # "Rename ?" until the name is free, or the old one goes
+            new = host.ask('%s "%s" exists. Rename ?' % (rtype, name), name)
+            if not new:
+                return aborted
+            if new != name:
+                name = new
+                continue
+            yes = host.answer('Kill previous %s "%s" ?' % (rtype, name), ["Cancel", "Yes", "No"])
+            if yes == "Cancel":
+                return aborted
+            if yes == "Yes":
+                return done(named(name))
+    if mode == "R":
+        rid = _unique_res_id(dres, rtype)
+    elif mode == "I":
+        ids = [r[1] for r in dres if r[0] == rtype]
+        rid = max(ids) + 1 if ids else 1000
+    elif mode == "K":
+        return done(with_id(rid))
+    while with_id(rid):         # "Renumber ?" until the ID is free, or the old one goes
+        new = host.ask("%s ID=%d exists. Renumber ?" % (rtype, rid), str(_unique_res_id(dres, rtype)))
+        if not new:
+            return aborted
+        m = re.match(r"\s*([+-]?\d+)", new)
+        n = _short_id(int(m.group(1))) if m else 0
+        if n != rid:
+            rid = n
+            continue
+        yes = host.answer("Kill previous %s ID=%d  ?" % (rtype, rid), ["Cancel", "Yes", "No"])
+        if yes == "Cancel":
+            return aborted
+        if yes == "Yes":
+            return done(with_id(rid))
+    return done(None)
+
+
 _FILECOPY_YEARS = {(1, 3): "1990,1991", (2, 0): "1990…1992", (2, 6): "1990…1992", (2, 7): "1990…1994",
                    (3, 1): "1990…1994", (3, 2): "1990…1995", (3, 7): "1990…1997", (3, 8): "1990…1998",
                    (4, 0): "1990…1999"}

@@ -1004,8 +1004,9 @@ def _open_res_file(tb, op):
     if not err and os.path.isfile(path):
         from hcx.macfiles import _sidecar_rsrc
         from hcx.resources import parse_resource_fork
-        res = parse_resource_fork(_sidecar_rsrc(path))
-        if res:
+        fork = _sidecar_rsrc(path)
+        res = parse_resource_fork(fork)
+        if res or len(fork) >= 256:     # an empty map (CreateResFile) opens too
             for ref, entries in tb.files.items():       # already open: the same refNum
                 if ref >= 100 and getattr(tb, "res_paths", {}).get(ref) == path:
                     tb.cur_res = ref
@@ -1020,10 +1021,47 @@ def _open_res_file(tb, op):
     tb.ret16(-1)
 
 
+@tb_trap(0xA9B1, 0xA81B)
+def _create_res_file(tb, op):
+    """CreateResFile(name) and HCreateResFile(vRefNum, dirID, name): an
+    empty resource fork, creating the file when there's none."""
+    from . import filemgr
+    from hcx.macfiles import _sidecar_rsrc
+    from hcx.resources import build_resource_fork
+    m = tb.m
+    dirid, vref = 0, 0
+    name_p = m.pop32()
+    if op & 0x3FF == 0x01B:
+        dirid = m.pop32()
+        vref = m.pops16()
+    fm = filemgr._fm(tb)
+    err, path, _v = fm.resolve(vref, dirid, m.pstr(name_p))
+    if err:
+        tb.res_err = err
+        return
+    if os.path.isdir(path):
+        tb.res_err = -48            # dupFNErr
+        return
+    if _sidecar_rsrc(path):
+        tb.res_err = -48
+        return
+    try:
+        if not os.path.exists(path):
+            open(path, "wb").close()
+            fm.set_finfo(path, b"\0\0\0\0", b"\0\0\0\0")
+        with open(path + ".rsrc", "wb") as fh:
+            fh.write(build_resource_fork([]))
+    except OSError:
+        tb.res_err = -36
+        return
+    tb.res_err = noErr
+
+
 @tb_trap(0xA99A)
 def _close_res_file(tb, op):
     ref = tb.m.pops16()
     if ref >= 100 and ref in tb.files:
+        _write_res_file(tb, ref)
         del tb.files[ref]
         tb.order.remove(ref)
         if tb.cur_res == ref:
@@ -1099,7 +1137,30 @@ def _size_resource(tb, op):
     tb.ret32(n)
 
 
-# writing resources: kept in memory for this run only (the stack file isn't changed)
+# writing resources: a file opened from the sandbox gets its resource fork ("name.rsrc") written back
+# by UpdateResFile and CloseResFile; the stack's own resources change in memory only
+
+def _mark(tb, ref):
+    if ref >= 100:
+        tb.res_dirty = getattr(tb, "res_dirty", set())
+        tb.res_dirty.add(ref)
+
+
+def _write_res_file(tb, ref):
+    """Writes an opened sandbox file's resources back to its "name.rsrc"."""
+    from hcx.resources import build_resource_fork
+    if ref not in getattr(tb, "res_dirty", set()) or ref not in getattr(tb, "res_paths", {}):
+        return
+    out = []
+    for rtype, rid, name, data in tb.files.get(ref, []):
+        h = tb.res_handles.get((ref, rtype, rid))
+        if h and tb.heap.is_handle(h) and tb.heap.deref(h):
+            data = bytes(tb.heap.handle_data(h))
+        out.append((rtype, rid, name, bytes(data)))
+    with open(tb.res_paths[ref] + ".rsrc", "wb") as fh:
+        fh.write(build_resource_fork(out))
+    tb.res_dirty.discard(ref)
+
 
 @tb_trap(0xA9AB)
 def _add_resource(tb, op):
@@ -1112,23 +1173,43 @@ def _add_resource(tb, op):
     tb.files.setdefault(tb.cur_res, []).insert(0, entry)
     tb.res_handles[(tb.cur_res, rtype, rid)] = h
     tb.handle_res[h] = (tb.cur_res, rtype, rid, name)
+    _mark(tb, tb.cur_res)
     tb.res_err = noErr
 
 
 @tb_trap(0xA9AA, 0xA9B0, 0xA999, 0xA9A9, 0xA9A7)
-def _res_noop(tb, op):
+def _res_write(tb, op):
     """ChangedResource, WriteResource, UpdateResFile, SetResInfo, SetResAttrs."""
     m = tb.m
     n = op & 0x3FF
+    tb.res_err = noErr
     if n in (0x1AA, 0x1B0):
-        m.pop32()
+        h = m.pop32() & 0xFFFFFF
+        info = tb.handle_res.get(h)
+        if info:
+            _mark(tb, info[0])
+            if n == 0x1B0:
+                _write_res_file(tb, info[0])
     elif n == 0x199:
-        m.pop16()
-    elif n == 0x1A9:
-        m.pop32(), m.pop16(), m.pop32()
+        _write_res_file(tb, m.pops16())
+    elif n == 0x1A9:            # SetResInfo(h, id, name)
+        name_p, rid, h = m.pop32(), m.pops16(), m.pop32() & 0xFFFFFF
+        info = tb.handle_res.get(h)
+        if not info:
+            tb.res_err = -192
+            return
+        f, rtype, old_id, old_name = info
+        name = m.pstr(name_p).decode("mac_roman", "replace") if name_p else old_name
+        entries = tb.files.get(f, [])
+        for i, r in enumerate(entries):
+            if r[0] == rtype and r[1] == old_id:
+                entries[i] = (rtype, rid, name, r[3])
+        tb.res_handles.pop((f, rtype, old_id), None)
+        tb.res_handles[(f, rtype, rid)] = h
+        tb.handle_res[h] = (f, rtype, rid, name)
+        _mark(tb, f)
     elif n == 0x1A7:
         m.pop16(), m.pop32()
-    tb.res_err = noErr
 
 
 @tb_trap(0xA9AD)
@@ -1139,16 +1220,22 @@ def _rmve_resource(tb, op):
         f, rtype, rid, _n = info
         tb.files[f] = [r for r in tb.files.get(f, []) if not (r[0] == rtype and r[1] == rid)]
         tb.res_handles.pop((f, rtype, rid), None)
+        _mark(tb, f)
     tb.res_err = noErr if info else -196
 
 
 @tb_trap(0xA810, 0xA9C1)
 def _unique_id(tb, op):
+    """UniqueID and Get1UniqueID: like the Mac's, a random unused ID (from a
+    fixed seed, so runs repeat), which callers loop on until it suits them."""
+    import random
     rtype = _ostype(tb.m.pop32())
-    used = {r[1] for f in tb.files for r in tb.files[f] if r[0] == rtype}
-    n = 128
+    files = [tb.cur_res] if op & 0x3FF == 0x010 else list(tb.files)
+    used = {r[1] for f in files for r in tb.files.get(f, []) if r[0] == rtype}
+    tb.rng = getattr(tb, "rng", None) or random.Random(1)
+    n = tb.rng.randint(0, 32767)
     while n in used:
-        n += 1
+        n = tb.rng.randint(0, 32767)
     tb.ret16(n)
 
 

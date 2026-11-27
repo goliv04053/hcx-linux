@@ -39,7 +39,8 @@ from . import mac68k, xcmdrun  # noqa: E402
 
 class Host(HostMixin):
     """Just enough of a window for the interpreter: answers and asks take
-    their defaults, and log lines are collected."""
+    their defaults (or the next of .replies, None cancelling an ask), and
+    log lines and dialogs are collected."""
 
     def __init__(self, st):
         self.stack = st
@@ -47,6 +48,8 @@ class Host(HostMixin):
         self.history = []
         self.encoding = "auto"
         self.lines = []
+        self.replies = []
+        self.dialogs = []
         self.init_host()
 
     @property
@@ -60,9 +63,15 @@ class Host(HostMixin):
         self.index = i
 
     def answer(self, text, buttons):
+        self.dialogs.append(["answer", str(text)] + [str(b) for b in buttons])
+        if self.replies:
+            return self.replies.pop(0)
         return buttons[0] if buttons else "OK"
 
     def ask(self, prompt, default="", password=False):
+        self.dialogs.append(["ask", str(prompt), str(default)])
+        if self.replies:
+            return self.replies.pop(0)
         return default
 
     def wait(self, secs):
@@ -124,30 +133,7 @@ def _finder(path):
     return b" {finder info %r}" % v[:8]
 
 
-def resource_fork(entries):
-    """A resource fork from [(type, id, name, data)]."""
-    import struct
-    types = {}
-    for t, rid, name, data in entries:
-        types.setdefault(t, []).append((rid, name, data))
-    datas, names, refs, tl = b"", b"", b"", b""
-    nt = len(types)
-    ref_off = 2 + 8 * nt
-    for t, items in types.items():
-        tl += t.encode("mac_roman") + struct.pack(">HH", len(items) - 1, ref_off + len(refs))
-        for rid, name, data in items:
-            noff = -1
-            if name:
-                noff = len(names)
-                nb = name.encode("mac_roman")
-                names += bytes([len(nb)]) + nb
-            refs += struct.pack(">hhI", rid, noff, len(datas) & 0xFFFFFF) + b"\0\0\0\0"
-            datas += struct.pack(">I", len(data)) + data
-    type_list = struct.pack(">H", (nt - 1) & 0xFFFF) + tl + refs
-    rmap = bytes(16) + bytes(4) + bytes(2) + bytes(2) + struct.pack(">HH", 28, 28 + len(type_list))
-    rmap += type_list + names
-    head = struct.pack(">IIII", 256, 256 + len(datas), len(datas), len(rmap))
-    return head + bytes(240) + datas + rmap
+from hcx.resources import build_resource_fork as resource_fork  # noqa: E402
 
 
 def sandbox(files):
@@ -188,21 +174,33 @@ def sandbox(files):
             for n in dirs + fs:
                 p = os.path.join(d, n)
                 rel = os.path.relpath(p, root).replace(os.sep, ":")
-                out[rel] = None if os.path.isdir(p) else open(p, "rb").read() + _finder(p)
+                if os.path.isdir(p):
+                    out[rel] = None
+                elif n.endswith(".rsrc"):       # a resource fork: its resources, in any order
+                    from hcx.resources import parse_resource_fork
+                    res = sorted(parse_resource_fork(open(p, "rb").read()))
+                    out[rel] = ("rsrc " + repr(res)).encode("latin-1", "replace")
+                else:
+                    out[rel] = open(p, "rb").read() + _finder(p)
         return out
     return snapshot
 
 
-def compare(h, name, kind, code, params, files=None):
+def compare(h, name, kind, code, params, files=None, replies=None):
+    """Runs the original and the native with the same params, files and
+    dialog replies, and prints whether result, files, globals and the
+    dialogs shown are the same."""
     it = h.interp
     h.lines.clear()
     globs = dict(it.globals)
     snap = sandbox(files or {})
+    h.replies, h.dialogs = list(replies or []), []
     emu = xcmdrun.emulate(it, name, kind, params, code)
     emu_files = snap()
     emu_globs = dict(it.globals)
-    emu_log = list(h.lines)
+    emu_log, emu_dialogs = list(h.lines), h.dialogs
     h.lines.clear()
+    h.replies, h.dialogs = list(replies or []), []
     it.globals.clear()
     it.globals.update(globs)
     snap = sandbox(files or {})
@@ -213,12 +211,14 @@ def compare(h, name, kind, code, params, files=None):
         xcmds._EXT_OVERRIDE.clear()
     nat_files = snap()
     nat_globs = dict(it.globals)
+    nat_dialogs = h.dialogs
     it.globals.clear()
     it.globals.update(globs)
     same = emu.get("error") is None and nat.get("error") is None and \
         (emu.get("result") or "") == (nat.get("result") or "") and emu_files == nat_files and \
-        emu_globs == nat_globs
-    print("%s %s %s" % ("=" if same else "≠", name, json.dumps(params, ensure_ascii=False)))
+        emu_globs == nat_globs and emu_dialogs == nat_dialogs
+    print("%s %s %s%s" % ("=" if same else "≠", name, json.dumps(params, ensure_ascii=False),
+                          "  replies " + json.dumps(replies, ensure_ascii=False) if replies else ""))
     print("   original: %s%s" % (_show(emu.get("result")), "   [%s]" % emu["error"] if emu.get("error") else ""))
     print("   native:   %s%s" % (_show(nat.get("result")), "   [%s]" % nat["error"] if nat.get("error") else ""))
     traps = ", ".join("%04X×%d" % (k, v) for k, v in sorted(emu.get("traps", {}).items()))
@@ -232,6 +232,11 @@ def compare(h, name, kind, code, params, files=None):
     for k in sorted(set(emu_globs) | set(nat_globs)):
         if emu_globs.get(k) != nat_globs.get(k):
             print("   global %s: original %s, native %s" % (k, _show(emu_globs.get(k)), _show(nat_globs.get(k))))
+    for d in emu_dialogs:
+        print("   dialog: %s" % json.dumps(d, ensure_ascii=False))
+    if emu_dialogs != nat_dialogs:
+        for d in nat_dialogs:
+            print("   native dialog: %s" % json.dumps(d, ensure_ascii=False))
     for line in emu_log + h.lines:
         print("   log: %s" % line)
     return same

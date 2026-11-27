@@ -43,6 +43,32 @@ def parse_resource_fork(rsrc):
     return out
 
 
+def build_resource_fork(entries):
+    """A resource fork from [(type, id, name, data)] (type a str), the
+    inverse of parse_resource_fork."""
+    types = {}
+    for t, rid, name, data in entries:
+        types.setdefault(t, []).append((rid, name, data))
+    datas, names, refs, tl = b"", b"", b"", b""
+    nt = len(types)
+    ref_off = 2 + 8 * nt
+    for t, items in types.items():
+        tl += t.encode("mac_roman") + struct.pack(">HH", len(items) - 1, ref_off + len(refs))
+        for rid, name, data in items:
+            noff = -1
+            if name:
+                noff = len(names)
+                nb = name.encode("mac_roman")
+                names += bytes([len(nb)]) + nb
+            refs += struct.pack(">hhI", rid, noff, len(datas) & 0xFFFFFF) + b"\0\0\0\0"
+            datas += struct.pack(">I", len(data)) + data
+    type_list = struct.pack(">H", (nt - 1) & 0xFFFF) + tl + refs
+    rmap = bytes(16) + bytes(4) + bytes(2) + bytes(2) + struct.pack(">HH", 28, 28 + len(type_list))
+    rmap += type_list + names
+    head = struct.pack(">IIII", 256, 256 + len(datas), len(datas), len(rmap))
+    return head + bytes(240) + datas + rmap
+
+
 ENCODING = ["mac_roman"]  # set by the importer (mac_roman or shift_jis)
 
 

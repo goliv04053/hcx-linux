@@ -218,10 +218,13 @@ def _cb(*codes):
 
 
 def _statement(it, src):
+    """A message from the external runs in the handler that called it, as
+    in HyperCard: after SendCardMessage("ask ..."), EvalExpr("it") sees the
+    answer."""
     sc = ht.Script("on __xcmd__\n%s\nend __xcmd__" % src)
     h = sc.handlers.get("__xcmd__")
     if h:
-        it.call(h, None, [], "do")
+        it.run_block(h.body)
 
 
 def _eval(it, src):
@@ -633,12 +636,17 @@ def emulate(it, name, kind, params, code=None):
         return None
     runner = XCmdRunner(it, name, kind)
     out = {"result": None, "passed": False, "error": None}
+    saved = it.frame
+    if saved is None:       # run from a tool, not from a handler: give it one
+        it.frame = ht.Frame(None, [], name)
     try:
         out["result"], out["passed"] = runner.run(code, params)
     except Unimplemented as e:
         out["error"] = "not emulated: %s" % e.what
     except EmuError as e:
         out["error"] = "stopped: %s" % e
+    finally:
+        it.frame = saved
     out["traps"] = dict(runner.tb.used)
     out["callbacks"] = dict(runner.callbacks)
     out["instructions"] = runner.m.lib.hcx_icount()
