@@ -277,6 +277,8 @@ def ditl_dialog(win, spec, on_click=None):
                 dd.set_selected(sel)
             place(dd, rect)
             widgets[n] = dd
+        elif k == "line":
+            place(Gtk.Separator(), rect, 1)
 
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["hcx-ditl"])
     if spec.get("proc") in (0, 4, 8, 12, 16):

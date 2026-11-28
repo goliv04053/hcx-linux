@@ -873,13 +873,242 @@ def _menu_lines(text):
     return lines
 
 
+def _append_menu(items, text):
+    """Adds menu items as the Menu Manager's AppendMenu does with a string:
+    ";" and return separate them; "(" disables one; "^x", "!x", "<x" and
+    "/x" set its icon, mark, style and key (and are not shown). An item
+    with no text ends the menu, as its zero length marks the end of a
+    menu record."""
+    if items and items[-1] is None:
+        return items
+    for part in text.replace("\r", ";").replace("\n", ";").split(";"):
+        name, enabled, mark, i = "", True, False, 0
+        while i < len(part):
+            c = part[i]
+            if c in "^!</" and i + 1 < len(part):
+                mark = mark or c == "!"
+                i += 2
+                continue
+            if c == "(":
+                enabled = False
+            else:
+                name += c
+            i += 1
+        if name == "":
+            items.append(None)
+            return items
+        items.append({"text": name, "sub": [], "enabled": enabled, "sep": name.startswith("-"),
+                      "checked": mark, "title": False})
+    return items
+
+
+def _menu_select(it, items, checked, h, v):
+    """PopUpMenuSelect with a menu of _append_menu: the item chosen, or 0."""
+    items = [i for i in items if i is not None]
+    if 1 <= checked <= len(items):
+        items[checked - 1]["checked"] = True
+    r = it.host.popup_menu(items, h, v)
+    return r[0] if r and 1 <= r[0] <= len(items) else 0
+
+
+# The fonts a Mac menu of FONT resources lists besides the stack's own (HyperCard's Font menu).
+_MENU_FONTS = ("Chicago", "Geneva", "Helvetica", "Monaco", "New York", "Palatino", "Times")
+
+
+def res_menu_names(rtype, resources):
+    """The items AddResMenu puts in a menu for a resource type: the names
+    of those resources (resources: (type, id, name, data) tuples), without
+    the ones starting with "." or "%", sorted; for fonts, also the fonts
+    every Mac has. Also used by the xemu's AddResMenu."""
+    names = {}
+    for r in resources:
+        if r[0] == rtype or (rtype == "FONT" and r[0] in ("FOND", "NFNT")):
+            name = r[2]
+            if name and name[0] not in ".%" and name.lower() not in names:
+                names[name.lower()] = name
+    if rtype == "FONT":
+        for name in _MENU_FONTS:
+            names.setdefault(name.lower(), name)
+    return [names[k] for k in sorted(names)]
+
+
+def _num_arg(a, i):
+    return int(ht.to_num(a[i])) if len(a) > i and ht.is_number(a[i]) else 0
+
+
+def _pstr255(text):
+    """A HyperCard string made a Pascal string (its first 255 bytes)."""
+    return text.encode("mac_roman", "replace")[:255].decode("mac_roman")
+
+
+_POPUPMENU_CRC = {0xDD190DCD: "any", 0x2F9B759D: "four", 0x77BBE03A: "four quiet"}
+
+
+def _pop_up_menu_versions(it, a, code):
+    """The PopUpMenu XFCNs of the test stacks (see pop_it_up), or None."""
+    import re
+    import zlib
+    a = [str(x) for x in a]
+    if b"Brown University" in code:
+        # Brown University's 2.0b: items on lines or between commas, the empty ones left out.
+        if not a:
+            m = re.search(rb"PopUpMenu 2\.0b(\d?)", code)
+            v = m.group(1).decode() if m else ""
+            if v == "4":
+                return "PopUpMenu 2.0b4 by Andrew Gilmartin, Brown University"
+            return "PopUpMenu 2.0b%s, \u00a9 Brown University 1989" % v
+        if len(a) > 4:
+            return ""
+        items = []
+        for ln in a[0].replace(",", "\n").split("\n"):
+            if ln:
+                _append_menu(items, ln)
+        n = _menu_select(it, items, _num_arg(a, 1), _num_arg(a, 2), _num_arg(a, 3))
+        return str(n) if n else ""
+    if b"APPENDALLMENUITEMS" in code:
+        # WWW.Where.com's: any length, in pieces of up to 250 characters cut at a comma.
+        text, items = a[0] if a else "", []
+        if not text:
+            return "0"
+        while text:
+            piece = text
+            if len(piece.encode("mac_roman", "replace")) > 250:
+                cut = piece[:250].rfind(",")
+                if cut <= 0:
+                    break
+                piece = piece[:cut]
+            _append_menu(items, piece.replace(",", ";"))
+            text = text[len(piece) + 1:] if len(piece) < len(text) else ""
+        return str(_menu_select(it, items, _num_arg(a, 1), _num_arg(a, 2), _num_arg(a, 3)))
+    if b"BungDabba" in code:
+        return _pop_up_menu_bungdabba(it, a)
+    if b"PopupMenu XFNC v32" in code:
+        return _pop_up_menu_fernandez(it, a)
+    kind = _POPUPMENU_CRC.get(zlib.crc32(code))
+    if kind is None:
+        return None
+    if kind != "any" and len(a) != 4:
+        return ""
+    items = _append_menu([], _pstr255(a[0] if a else "").replace(",", ";"))
+    n = _menu_select(it, items, _num_arg(a, 1), _num_arg(a, 2), _num_arg(a, 3))
+    return "" if n == 0 and kind == "four quiet" else str(n)
+
+
+_BUNGDABBA_HELP = ("popUpMenu( MenuText, MenuLoc [,DefaultItemNum] [,TextFont] [,TextSize] ) \n"
+                   "Returns text of the menu item selected.  Errors reported in the HC global \u201cgXCMDError\u201d.")
+
+
+def _pop_up_menu_bungdabba(it, a):
+    """BungDabba's popUpMenu(MenuText, "h,v" [, DefaultItemNum, TextFont,
+    TextSize]): the items are the lines and items of the text (the
+    itemDelimiter), each up to 255 characters and shown as it is (an empty
+    one ends the menu, as on the Mac); answers the item's text and number
+    on two lines ("" and 0 when none was chosen). Errors go into the
+    global gXCMDError, which is emptied otherwise."""
+    def err(msg):
+        it.globals["gxcmderror"] = msg
+
+    if len(a) == 1 and a[0][:1] in ("!", "?"):
+        err("")
+        return "\u00a9 BungDabba Productions 1991,  ver 1.0." if a[0][:1] == "!" else _BUNGDABBA_HELP
+    if not 2 <= len(a) <= 5:
+        err("")
+        return _BUNGDABBA_HELP
+    if len(a[0].encode("mac_roman", "replace")) < 2:
+        err("no text specified for the menu.")
+        return ""
+    pt = a[1].split(",")
+    if len(pt) != 2 or not all(ht.is_number(x.strip()) for x in pt):
+        err("invalid location specified for the menu.")
+        return ""
+    h, v = (int(ht.to_num(x.strip())) for x in pt)
+    delim = str(it.props.get("itemdelimiter", ","))[:1] or "\u00e9"
+    items, text = [], a[0].replace("\r", "\n")
+    while text:
+        k = min([i for i in (text.find("\n"), text.find(delim)) if i >= 0] or [len(text)])
+        items.append(text[:k][:255])
+        text = text[k + 1:]
+    menu = []
+    for k, name in enumerate(items, 1):     # AppendMenu(" ") then SetMenuItemText, item by item
+        menu.append(" ")
+        if k <= len(menu):
+            menu[k - 1] = name
+            if name == "":                  # no text: the menu record ends there
+                del menu[k - 1:]
+    shown = [{"text": name, "sub": [], "enabled": True, "sep": name.startswith("-"),
+              "checked": False, "title": False} for name in menu]
+    default = _num_arg(a, 2)
+    if 1 <= default <= len(shown):
+        shown[default - 1]["checked"] = True
+    r = it.host.popup_menu(shown, h, v)
+    err("")
+    if not r or not 1 <= r[0] <= len(shown):
+        return "\n0"
+    return "%s\n%d" % (shown[r[0] - 1]["text"], r[0])
+
+
+_FERNANDEZ_HELP = "PopupMenu XFNC v32,  Help follows -->\n\n© Bill Fernandez 1989, all rights reserved.\nNo warranty expressed or implied.\n_______________________________________________\nSYNTAX:\n\nget PopupMenu(menu items, current item, menu left, menu top)\n\n_______________________________________________\nDEFINITIONS:\n\nMENU ITEMS =  a list of the menu item names, in the form--\nFirstItem[*] SecondItem[*]  ...LastItem[*]\n\n* =  an optional list of item-modifiers, in the form--\nFirstModifier, SecondModifier, ...LastModifier\n\nCURRENT ITEM =  the number of the menu-item that will be positioned just above(!) the TOP parameter described below.\n\nMENU LEFT =  the number of pixels, from the left edge of the card, at which the left edge of the menu will be positioned.\n\nMENU TOP =  the number of pixels, from the top edge of the card, at which the top edge of the menu will be positioned.  Note that the card begins below(!) the titlebar.\n\n_______________________________________________\nITEM-MODIFIERS:\n\nDISABLED\n\nBOLD\n\nITALIC\n\nOUTLINE\n\nSHADOW\n\nUNDERLINE\n\nCONDENSE\n\nEXTEND\n\nAPPLE_MARK\n\nDIAMOND_MARK\n\nCHECKMARK\n\nMARK followed by a space and any character.\n\nCOMMAND followed by a space and any character.\n\nICON followed by a space and an ICON ID number from 257 to 511.\n\nSICN or SMALL_ICON followed by a space and a SICN ID number from 257 to 511.\n\nRICN (short for \"reduced\" icon) or SHRUNKEN_ICON followed by a space and an ICON ID number from 257 to 511.\n\n_______________________________________________\nNOTES:\n\n(1) The item list parameter may be a field or variable with each item on its own line, or it may be a quoted string typed directly into the script.\n\n(2) Item-modifiers may be typed in completely, or shortened to their first four letters.  They may be in upper or lowercase.\n\n(3) Try specifying only one, two, or three parameters.  The XFNC tries to default any unspecified parameters to safe and useful values.\n\n(4) An item with a small or shrunken icon cannot have a command character.\n\n(5) Modifiers may be specified in any order.\n\n(6) When there is a conflict, modifiers that appear later in a modifier-list will take precedence over modifiers that appear earlier in the list.\n"
+
+_FERNANDEZ_MARKS = {"APPL": True, "DIAM": True, "CHEC": True, "MARK": True}
+
+
+def _pop_up_menu_fernandez(it, a):
+    """Bill Fernandez's PopupMenu(items, current item, left, top), v32:
+    an item per line, with modifiers in brackets after its name
+    ("Name[disabled, bold, checkmark]", the first four letters are enough;
+    a later one wins). Answers "number,name", or 0. Without parameters,
+    its help."""
+    if not a:
+        return _FERNANDEZ_HELP
+    t = a[0].replace("\r", "\n")
+    items, i = [], 0
+    while i < len(t):
+        j = i
+        while j < len(t) and t[j] not in "[\n":
+            j += 1
+        name, enabled, marked = t[i:j], True, False
+        i = j
+        if i < len(t) and t[i] == "[":
+            j = i + 1
+            while j < len(t) and t[j] not in "]\n":
+                j += 1
+            for mod in t[i + 1:j].split(","):
+                word = mod.strip().upper()[:4]
+                if word == "DISA":
+                    enabled = False
+                elif word in _FERNANDEZ_MARKS:
+                    marked = True
+            i = j + 1 if j < len(t) and t[j] == "]" else j
+        if i < len(t) and t[i] == "\n":
+            i += 1
+        items.append({"text": name or " ", "sub": [], "enabled": enabled, "sep": name.startswith("-"),
+                      "checked": marked, "title": False})
+    r = it.host.popup_menu(items, _num_arg(a, 2), _num_arg(a, 3))
+    if not r or not 1 <= r[0] <= len(items):
+        return "0"
+    return "%d,%s" % (r[0], items[r[0] - 1]["text"])
+
+
 @xfcn("PopItUp", "PopUpMenu", "PopUp")
 def pop_it_up(it, a):
-    """PopItUp(items, checkedItem, h, v[, flags]) shows a pop-up menu at
+    """PopUpMenu(items, checkedItem, h, v): the versions of the test stacks
+    (Brown University's 2.0b, WWW.Where.com's, Minkowski's, HyperScience's
+    and Quel Giorno's) put the items in a Mac menu (with its ";", "(" and
+    other marks) and answer the number of the item chosen (0, or empty in
+    some, when none was). Otherwise:
+
+    PopItUp(items, checkedItem, h, v[, flags]) shows a pop-up menu at
     h,v (card coordinates) and returns "line,subitem", or 0 if cancelled.
     Lines starting with "<X" carry a style and are shown as a title; "("
     disables an item; "-" is a separator. Items of a line separated by
     commas become a submenu unless flags contain "nosubmenus"."""
+    for name in ("PopUpMenu", "PopItUp", "PopUp"):
+        code = _ext_code(it, name)
+        if code:
+            r = _pop_up_menu_versions(it, a, code)
+            if r is not None:
+                return r
+            break
     lines = _menu_lines(_arg(a, 0))
     checked = int(ht.to_num(_arg(a, 1, "0") or 0)) if ht.is_number(_arg(a, 1, "0")) else 0
     try:
@@ -908,12 +1137,556 @@ def pop_it_up(it, a):
     return "%d,%d" % (line, sub)
 
 
+# -- Mac menus, as the Menu Manager keeps them --------------------------------------------------
+
+def parse_menu_meta(text):
+    """AppendMenu's items for a string (bytes, Mac Roman): ";" or return
+    between items, "^" icon, "!" mark, "<" style, "/" key, "(" disabled.
+    [([name, icon, cmd, mark, style], enabled)]. Also the xemu's."""
+    out = []
+    for part in text.replace(b"\r", b";").split(b";"):
+        name, icon, cmd, mark, style, enabled = bytearray(), 0, 0, 0, 0, True
+        i = 0
+        while i < len(part):
+            c = part[i]
+            if c in b"^!</" and i + 1 < len(part):
+                v = part[i + 1]
+                if c == ord("^"):
+                    icon = v - 48
+                elif c == ord("!"):
+                    mark = v
+                elif c == ord("/"):
+                    cmd = v
+                else:
+                    style |= {ord("B"): 1, ord("I"): 2, ord("U"): 4, ord("O"): 8, ord("S"): 16}.get(v, 0)
+                i += 2
+                continue
+            if c == ord("("):
+                enabled = False
+                i += 1
+                continue
+            name.append(c)
+            i += 1
+        out.append(([bytes(name), icon & 0xFF, cmd, mark, style], enabled))
+    return out
+
+
+class _MacMenu:
+    """A menu record: its ID, enable flags and items ([name, icon, cmd,
+    mark, style], the name in Mac Roman). An item with an empty name ends
+    the menu, as its zero length byte does in the record."""
+
+    def __init__(self, mid, items=(), flags=0xFFFFFFFF):
+        self.id, self.flags, self.items = mid, flags, [list(e) for e in items]
+        self._trim()
+
+    @classmethod
+    def from_resource(cls, mid, data):
+        """A MENU resource (ID, width, height, proc, flags, title, items)."""
+        import struct
+        if len(data) < 15:
+            return cls(mid)
+        flags = struct.unpack(">I", data[10:14])[0]
+        pos = 15 + data[14]
+        items = []
+        while pos < len(data) and data[pos]:
+            n = data[pos]
+            items.append([data[pos + 1:pos + 1 + n]] + list(data[pos + 1 + n:pos + 5 + n].ljust(4, b"\0")))
+            pos += 5 + n
+        return cls(mid, items, flags)
+
+    def _trim(self):
+        for k, e in enumerate(self.items):
+            if not e[0]:
+                del self.items[k:]
+                return
+
+    def count(self):
+        return len(self.items)
+
+    def item(self, n):
+        return self.items[n - 1] if 1 <= n <= len(self.items) else None
+
+    def insert(self, text, after=1 << 15):
+        """AppendMenu (and InsMenuItem after an item) with metacharacters."""
+        at = max(0, min(after, len(self.items)))
+        for k, (e, enabled) in enumerate(parse_menu_meta(text)):
+            n = at + k + 1
+            if n < 32:      # the enable bits after it move up
+                low = self.flags & ((1 << n) - 1)
+                high = (self.flags >> n) << (n + 1)
+                self.flags = (low | high | ((1 << n) if enabled else 0)) & 0xFFFFFFFF
+            self.items.insert(at + k, e)
+        self._trim()
+
+    def insert_names(self, names, after=1 << 15):
+        """AddResMenu and InsertResMenu: each name an item as it is."""
+        for k, name in enumerate(names):
+            at = min(after, self.count()) + k if after != 1 << 15 else self.count()
+            self.insert(b"x", at)
+            self.items[at][0] = name.encode("mac_roman", "replace")[:255]
+
+    def delete(self, n):
+        if 1 <= n <= len(self.items):
+            del self.items[n - 1]
+            if n < 32:
+                f = self.flags
+                self.flags = (f & ((1 << n) - 1)) | ((f >> (n + 1)) << n)
+
+    def set(self, n, index, value):
+        """Sets the name (0), icon, key, mark or style of item n."""
+        e = self.item(n)
+        if e:
+            e[index] = value if index == 0 else value & 0xFF
+            self._trim()
+
+    def enabled(self, n):
+        return bool(self.flags & 1) and (n >= 32 or bool(self.flags & (1 << n)))
+
+    def host_items(self, menus, depth=0):
+        """The items as host.popup_menu takes them, and for each the
+        (menu, item number) of each row of its submenu; a submenu's own
+        submenus are flattened into it ("child › grandchild"), as the
+        xemu's PopUpMenuSelect shows them. menus: ID -> _MacMenu."""
+        out, rows = [], []
+        for k, (name, icon, cmd, mark, style) in enumerate(self.items, 1):
+            text = name.decode("mac_roman", "replace").replace("\r", "\n")
+            sub, srows = [], []
+            sub_m = menus.get(mark) or menus.get(mark - 256) if cmd == 0x1B and depth < 4 else None
+            if sub_m:
+                kids, kid_rows = sub_m.host_items(menus, depth + 1)
+                for j, kid in enumerate(kids, 1):
+                    if kid["sub"]:
+                        sub += ["%s › %s" % (kid["text"], g) for g in kid["sub"]]
+                        srows += kid_rows[j - 1]
+                    else:
+                        sub.append(kid["text"])
+                        srows.append((sub_m, j))
+            out.append({"text": text, "sub": sub, "enabled": self.enabled(k), "sep": text.startswith("-"),
+                        "checked": mark != 0 and cmd != 0x1B, "title": False, "style": style})
+            rows.append(srows)
+        return out, rows
+
+    def select(self, it, menus, h, v):
+        """PopUpMenuSelect: (menu, item) chosen (item 0: none), and whether
+        it can be chosen (a disabled one answers 0 but is in MenuDisable)."""
+        items, rows = self.host_items(menus)
+        r = it.host.popup_menu(items, h, v)
+        if not r or not 1 <= r[0] <= len(items):
+            return self, 0, False
+        line, sub = r
+        if sub and 1 <= sub <= len(rows[line - 1]):
+            m, n = rows[line - 1][sub - 1]
+            return m, n, m.enabled(n)
+        return self, line, self.enabled(line)
+
+
+def _resource_data(it, rtype, rid):
+    try:
+        chain = it.host.resource_chain()
+    except Exception:  # noqa: BLE001
+        return None
+    for res in chain:
+        for r in res:
+            if r[0] == rtype and r[1] == rid:
+                return r[3]
+    return None
+
+
+def _all_resources(it):
+    try:
+        return [r for res in it.host.resource_chain() for r in res]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+# -- HPopUpMenu: Jon Pugh's ---------------------------------------------------------------------------
+
+class _PughError(Exception):
+    pass
+
+
+class _Pugh:
+    """Jon Pugh's HPopupMenu (3.1.2, 3.2.2, 3.3): its menus are built as
+    the XFCN builds them, with the same Menu Manager calls."""
+    STYLES = b"BIOSU"
+
+    def __init__(self, it, version):
+        self.it, self.version = it, version
+        self.menus = []         # by number: 0 is the main menu, ID 128; None once disposed
+        self.inserted = {}      # ID -> menu (InsertMenu)
+        self.res = None
+
+    def res_names(self, rtype):
+        if self.res is None:
+            self.res = _all_resources(self.it)
+        return res_menu_names(rtype, self.res)
+
+    def new_menu(self, mid):
+        m = _MacMenu(mid)
+        self.menus.append(m)
+        return m
+
+    def insert(self, m):
+        self.inserted[m.id] = m
+
+    @staticmethod
+    def small_icon(t):
+        """SMALLICON: "name†n" is item name with small icon n (a "/x" key
+        at the end is kept): (icon, name)."""
+        k = t.find(b"\xa0")
+        if k < 0:
+            return 0, t
+        rest, t = t[k + 1:], t[:k]
+        if len(rest) >= 2 and rest[-2] == 0x2F:
+            t += rest[-2:]
+        return (rest[0] - 48 if rest else 0), t
+
+    # DEPENDMENU: one item, its metacharacters kept only where they mean something
+    def depend(self, t, m):
+        if len(t) == 5 and t[0] == 0xA8:      # "®FONT": the resources of a type
+            m.insert_names(self.res_names(t[1:5].decode("mac_roman")))
+            return
+        icon, t = self.small_icon(t)
+        if icon > 0:
+            self.depend(t, m)
+            last = self.menus[-1].count()   # (the XFCN counts the newest menu's items)
+            m.set(last, 2, 0x1E)
+            m.set(last, 1, icon)
+            return
+        self.append(t, m)
+
+    def append(self, t, m, semicolon=True):
+        """The item as AppendMenu sees it, then its name without the
+        metacharacters that mean something."""
+        n = len(t)
+        s = bytearray(t)
+        for i in range(n):
+            c = s[i]
+            nxt = s[i + 1] if i + 1 < n else None
+            if c == 0x2F and i != n - 2:
+                s[i] = 0x5C                     # "/" but the key's: "\"
+            elif c in (0x5E, 0xA0):
+                if not (nxt is not None and 0x30 < nxt < 0x7F):
+                    s[i] = 0x76                 # "^" but an icon's: "v"
+            elif c == 0x3C and not (nxt is not None and nxt in self.STYLES):
+                s[i] = 0x3E                     # "<" but a style's: ">"
+            elif c == 0x21 and i != n - 2:
+                s[i] = 0x31                     # "!" but the mark's: "1"
+            elif c == 0x3B and semicolon:
+                s[i] = 0x3A                     # ";" -> ":"
+            elif c == 0x28 and i != 0:
+                s[i] = 0x29                     # "(" but the first: ")"
+        m.insert(bytes(s))
+        r, i = bytearray(), 0
+        while i < n:
+            c = t[i]
+            nxt = t[i + 1] if i + 1 < n else None
+            if (c == 0x2F and i == n - 2) or \
+                    (c in (0x5E, 0xA0) and nxt is not None and 0x30 < nxt < 0x7F) or \
+                    (c == 0x3C and nxt is not None and nxt in self.STYLES) or \
+                    (c == 0x21 and (i == n - 2 or i == 0)):
+                i += 2
+            elif c == 0x28 and i == 0:
+                i = 1
+            else:
+                r.append(c)
+                i += 1
+        m.set(m.count(), 0, bytes(r))
+
+    # 3.1.2 and 3.2.2: one line an item, and the items after its first delimiter its submenu
+    def add_item_v3(self, t, m):
+        if len(t) == 5 and t[0] == 0xA8:
+            m.insert_names(self.res_names(t[1:5].decode("mac_roman")))
+            return
+        icon, t = self.small_icon(t)
+        if icon > 0:
+            m.insert(t)
+            m.set(m.count(), 2, 0x1E)
+            m.set(m.count(), 1, icon)
+        else:
+            self.append(t, m, semicolon=False)
+
+    def line_menu(self, text, d, always_subs=False):
+        t = bytearray(text).replace(b"\r", b";")
+        if b";" not in t:
+            t = t.replace(d, b";")
+        if not t or t[-1] != 0x3B:
+            t.append(0x3B)
+        dc, dset = d[0], {d[0], 0x3B}
+        start = 1 if t[0] in dset else 0
+        main = self.new_menu(128)
+        first, has_sub, seg = True, False, start
+        for i in range(start, len(t)):
+            c = t[i]
+            if first and c in dset:
+                item = t[seg:i][:255]
+                if c == dc:
+                    first = False
+                    has_sub = has_sub or always_subs    # 3.1.2
+                    if not (i + 1 < len(t) and t[i + 1] in dset):
+                        has_sub = True
+                        item = (item + b"/\x1b")[:255]
+                self.add_item_v3(bytes(item), main)
+            if c == 0x3B:
+                seg, first = i + 1, True
+        self.insert(main)
+        if has_sub:
+            first, have, seg, k, sub = True, False, 0, 0, None
+            for i in range(start, len(t)):
+                c = t[i]
+                if c not in dset:
+                    continue
+                if not first:
+                    if i != seg:
+                        self.add_item_v3(bytes(t[seg:i][:255]), sub)
+                        have = True
+                    if c == 0x3B:
+                        if not have:
+                            main.set(k, 3, 0)
+                            self.inserted.pop(sub.id, None)
+                            self.menus.pop()
+                        else:
+                            self.insert(sub)
+                else:
+                    k += 1
+                    if c == dc:
+                        if len(self.menus) > 300:
+                            raise _PughError("Error: Too many menu items")
+                        sub = self.new_menu(len(self.menus) + 128)
+                        main.set(k, 3, sub.id)
+                        have = False
+                seg, first = i + 1, c == 0x3B
+        return main
+
+    # STRINGMENU and MAKEMENUS: items between the level characters
+    def string_menu(self, text, levels, dset, own_delims):
+        t = bytearray(text)
+        if not own_delims:
+            t = t.replace(b"\r", b";")
+            if b";" not in t and len(levels) > 1:
+                t = t.replace(levels[1:2], b";")
+        if not t or t[-1] != 0x3B:
+            t.append(0x3B)
+        self.t, self.dset, self.levels = bytes(t), dset, levels
+        self.pos = 1 if t[0] in dset else 0
+        self.level = 0
+        main = self.new_menu(128)
+        self.make_menus(0)
+        self.insert(main)
+        return main
+
+    def level_of(self, c):
+        k = self.levels.find(bytes([c]))
+        return k if k >= 0 else 0
+
+    def make_menus(self, cur):
+        t, end, k = self.t, len(self.t) - 1, 0
+        while True:
+            if self.pos >= end:
+                return
+            start = self.pos
+            while self.pos < end and t[self.pos] not in self.dset:
+                self.pos += 1
+            item = t[start:self.pos][:255]
+            if item:
+                k += 1
+            lvl = self.level_of(t[self.pos])
+            m = self.menus[cur]
+            if lvl == self.level:
+                if item:
+                    self.depend(item, m)
+                self.pos += 1
+                continue
+            if lvl > self.level + 1:
+                raise _PughError(self.version.get("skipped", "Error: Skipped a submenu level."))
+            if lvl < self.level:
+                if item:
+                    self.depend(item, m)
+                self.insert(m)
+                self.level = lvl
+                self.pos += 1
+                return
+            # one level down: the item has a submenu
+            parent = item + b"/\x1b"
+            self.depend(parent, m)
+            if len(self.menus) > 300:
+                raise _PughError("Error: Too many submenus")
+            num = len(self.menus)
+            mid = num + 128
+            m.set(k, 3, mid)
+            sub = self.new_menu(mid)
+            self.pos += 1
+            self.level += 1
+            self.make_menus(num)
+            if num == len(self.menus) - 1 and sub.count() == 0:
+                m.set(k, 3, 0)
+                self.inserted.pop(mid, None)
+                self.menus.pop()
+                m.delete(k)
+                self.depend(parent[:-2], m)
+            else:
+                self.insert(sub)
+            if self.level != lvl - 1:
+                return
+
+    # RESOURCEMENU and SCANMENUS: a MENU resource and its submenus
+    def resource_menu(self, rid):
+        data = _resource_data(self.it, "MENU", rid)
+        if data is None:
+            raise _PughError("Error: Invalid Menu Number")
+        main = _MacMenu.from_resource(128, data)
+        self.menus.append(main)
+        self.insert(main)
+        self.scan(main)
+        return main
+
+    def scan(self, m):
+        i = 1
+        while i <= m.count():
+            name, icon, cmd, mark, style = m.item(i)
+            if len(name) == 5 and name[0] == 0xA8:
+                m.delete(i)
+                m.insert_names(self.res_names(name[1:5].decode("mac_roman")), i - 1)
+            elif cmd == 0x1B:
+                data = _resource_data(self.it, "MENU", mark)
+                if data is None:
+                    raise _PughError("Error: Submenu resource not found")
+                mid = len(self.menus) + 128
+                m.set(i, 3, mid)
+                sub = _MacMenu.from_resource(mid, data)
+                self.menus.append(sub)
+                self.scan(sub)
+                self.insert(sub)
+            i += 1
+
+
+def _param_num(s):
+    """PARAMTONUM: HyperCard's StrToNum of the parameter (0 if not a number)."""
+    s = str(s).strip()
+    if not ht.is_number(s):
+        return 0
+    try:
+        return int(ht.to_num(s))
+    except (ht.HTError, ValueError, OverflowError):
+        return 0
+
+
+def _is_numeric(raw):
+    """NUMERIC: not empty, and only digits, "+", "-" and spaces."""
+    return bool(raw) and all(c in b"0123456789+- " for c in raw)
+
+
+def _h_pop_up_menu_pugh(it, a, code):
+    """HPopupMenu({items | MENU id}, item, top, left [, font, size [, delimiters]])
+    by Jon Pugh. Items are separated by return or ";" (or the
+    itemDelimiter on one line); an item followed by the itemDelimiter
+    gets a submenu of the items that follow, up to the next return or
+    ";". With delimiters, its characters are the levels: the first ends
+    an item of the same level, the second opens a submenu, and so on.
+    A resource ID builds the menu from MENU resources (and their
+    submenus); "®TYPE" lists the resources of a type. The answer is
+    "text,subtext,...,item,subitem,..." (the second delimiter between
+    them, "0" as the subitem of a main item), or empty when nothing was
+    chosen (or the mouse was already up)."""
+    def pstr(marker):
+        k = code.find(marker)
+        return code[k:k + code[k - 1]].decode("mac_roman") if k > 0 else ""
+
+    about, usage = pstr(b"HPopupMenu 3"), pstr(b"Usage: HPopupMenu")
+    has_delims = b"[, delimiter]" in code
+    a = [str(x) for x in a]
+    if len(a) == 1:
+        return about if a[0] == "!" else usage
+    if not 4 <= len(a) <= (7 if has_delims else 6):
+        return usage
+    if not it.host.mouse_is_down() or a[0] == "":
+        return ""
+
+    def mac(s):
+        return s.encode("mac_roman", "replace").replace(b"\n", b"\r")
+
+    levels_ok = b"Skipped a submenu level" in code     # 3.3: levels of delimiters
+    own = has_delims and len(a) >= 7
+    idel = mac(str(it.props.get("itemdelimiter", ",")))
+    if not levels_ok:
+        # 3.1.2, 3.2.2: one delimiter, the given one if it is one character
+        d = mac(a[6]) if own and len(mac(a[6])) == 1 else idel if len(idel) == 1 else b","
+    elif own:
+        levels = mac(a[6]) or b","
+        dset = set(levels)
+        d = levels[1:2] or b"\0"
+    else:
+        levels = b";" + (idel or b",")
+        dset = set(levels) | {0x3B}
+        d = levels[1:2] or b"\0"
+    item = _param_num(a[1])
+    v, h = _param_num(a[2]), _param_num(a[3])
+    p = _Pugh(it, {})
+    raw = mac(a[0])
+    pas = raw if len(raw) < 256 else b""
+    try:
+        if _is_numeric(pas):
+            main = p.resource_menu(_param_num(a[0]))
+        elif len(pas) == 5 and pas[0] == 0xA8:
+            main = p.new_menu(128)
+            main.insert_names(p.res_names(pas[1:5].decode("mac_roman")))
+            p.insert(main)
+        elif not levels_ok:
+            main = p.line_menu(raw, d, not has_delims)
+        else:
+            main = p.string_menu(raw, levels, dset, own)
+    except _PughError as e:
+        return str(e)
+    if item > 0:
+        main.set(item, 3, 0x12)
+    if not it.host.mouse_is_down():
+        return ""
+    m, n, enabled = main.select(it, p.inserted, h, v)
+    if n == 0 or not (n > 31 or m.flags & (1 << n)) and (m is not main or has_delims):
+        return ""       # (3.1.2 answers a disabled item of the main menu too)
+
+    def name(menu, k):
+        return menu.item(k)[0].replace(b"\0", b"") if menu.item(k) else b""
+
+    def cat(*parts):
+        return b"".join(parts)[:255]
+
+    if m is main:
+        out = cat(name(m, n), d, d, str(n).encode(), d, b"0")
+    else:
+        text, nums = name(m, n), str(n).encode()
+        while m is not main:
+            parent = None
+            for pm in p.menus:
+                for k, e in enumerate(pm.items, 1):
+                    if e[2] == 0x1B and e[3] == m.id:
+                        parent = (pm, k)
+                        break
+                if parent:
+                    break
+            if parent is None:
+                break
+            m, n = parent
+            if len(text) + len(name(m, n)) + 1 < 256:
+                text = cat(name(m, n), d, text)
+            nums = cat(str(n).encode(), d, nums)
+        out = cat(text, d, nums) if len(text) + len(nums) + 1 < 256 else nums
+    return out.split(b"\0")[0].decode("mac_roman").replace("\r", "\n")
+
+
 @xfcn("HPopUpMenu", "FullHPop")
 def h_pop_up_menu(it, a):
     """HPopUpMenu(items, checkedItem, top, left) pops up a menu with the given
     items (lines, or one line of comma-separated items) with its top-left
     corner at left,top and returns "item text,,item number", or empty if
     nothing was chosen. A menu resource id as items isn't supported."""
+    for name in ("HPopUpMenu", "FullHPop"):
+        code = _ext_code(it, name)
+        if code:
+            if b"Jon Pugh" in code:
+                return _h_pop_up_menu_pugh(it, a, code)
+            break
     src = str(_arg(a, 0))
     if ht.is_number(src):
         return ""
@@ -3359,53 +4132,110 @@ def dialoger(it, a):
     return "\n".join(out)
 
 
+_SHOWLIST_APPLE = ("ShowList XFCN 1.1 \u00a91990 Apple Computer, Inc. All Rights Reserved.",
+                   "Form:  ShowList(<listItems>, <textPrompt>, <multiSelect>, <typingSelect>, "
+                   "<button names>, <selectedLine> [,<left>, <top>]",
+                   "Written by Jay Hodgdon 11/2/90")
+
+
 @xfcn("ShowList")
 def show_list(it, a):
-    """ShowList(list, prompt, multiple, ?, "OK,Cancel^", selected line [, h, v])
-    from Apple's externals. Answers the button name on line 1 and the chosen
-    line numbers on line 2 (empty when the button ends with ^, the cancel button)."""
-    items = str(_arg(a, 0))
-    prompt = _arg(a, 1)
-    delim = "\n"
-    rest = list(a[2:])
-    if ht.is_number(prompt) and len(a) >= 3:
-        delim = chr(int(ht.to_num(prompt)))
-        prompt, rest = _arg(a, 2), list(a[3:])
-    multiple = _truth(rest[0]) if rest else False
-    buttons = str(rest[2]) if len(rest) > 2 and str(rest[2]) else "OK,Cancel^"
-    sel = int(ht.to_num(rest[3])) if len(rest) > 3 and ht.is_number(rest[3]) else 0
-    lines = items.split(delim)
-    if lines and lines[-1] == "":
-        lines.pop()
-    names = [b for b in buttons.split(",") if b != ""][:4]
-    width = 300
-    list_h = min(16 * max(4, len(lines)), 200)
-    prompt_h = 16 * max(1, min(6, len(str(prompt)) // 40 + 1 + str(prompt).count("\n")))
-    top = 8 + prompt_h + 6
-    bottom = top + list_h + 10
-    spec = {"title": "", "proc": 1, "width": width, "height": bottom + 30, "default": 1, "items": [], "cancel": None}
-    x = width - 8
-    for k, b in reversed(list(enumerate(names))):
-        bw = max(60, 8 * len(b.rstrip("^")) + 16)
-        spec["items"].append({"n": k + 1, "kind": "button", "text": b.rstrip("^"), "enabled": True,
-                              "rect": (x - bw, bottom, x, bottom + 20)})
-        if b.endswith("^"):
-            spec["cancel"] = k + 1
-        x -= bw + 10
-    spec["items"].sort(key=lambda i: i["n"])
-    nb = len(names)
-    spec["items"].append({"n": nb + 1, "kind": "static", "text": str(prompt), "enabled": False,
-                          "rect": (8, 8, width - 8, 8 + prompt_h)})
-    spec["items"].append({"n": nb + 2, "kind": "list", "lines": lines, "multiple": multiple,
-                          "selected": [sel] if sel > 0 else [], "enabled": True,
-                          "rect": (8, top, width - 8, top + list_h)})
+    """ShowList(listItems, prompt, multiSelect, typingSelect, "button
+    names", selectedLine [, left, top]), Apple's XFCN 1.1: a list of the
+    lines that are not empty, the prompt above it and up to four buttons
+    in a column on the right, the first at the bottom (Return). A ^ at the
+    end of a name draws a line above that button. Answers the button's
+    name and, on a second line, the numbers of the chosen lines, joined by
+    commas. ShowList("?"), ("!") and ("*") answer the form, the version and
+    the author; other numbers of parameters, the version. Studium's
+    version takes a delimiter after the list (see _show_list_studium)."""
+    a = [str(x) for x in a]
+    code = _ext_code(it, "ShowList")
+    if b"Form: ShowList(listText,delimiter" in code:
+        return _show_list_studium(it, a)
+    version, form, author = _SHOWLIST_APPLE
+    if len(a) == 1 and a[0] in ("!", "?", "*"):
+        return {"!": version, "?": form, "*": author}[a[0]]
+    if len(a) not in (6, 8):
+        return version
+    lines = [ln for ln in a[0].replace("\r", "\n").split("\n") if ln]
+    multiple = _truth(a[2])
+    names = a[4].split(",")[:4]
+    lined = [n.endswith("^") for n in names]
+    names = [n[:-1] if n.endswith("^") else n for n in names]
+    sel = int(ht.to_num(a[5])) if ht.is_number(a[5]) else 0
+    sel = min(sel, len(lines))
+    tops = (176, 132, 92, 52)
+    items = []
+    for k, name in enumerate(names):
+        left = 268 if k == 0 else 265
+        right = 351 if k == 0 else 355
+        items.append({"n": k + 1, "kind": "button", "text": name, "enabled": True,
+                      "rect": (left, tops[k], right, tops[k] + 20)})
+    items.append({"n": 5, "kind": "static", "text": a[1], "enabled": False, "rect": (10, 10, 355, 42)})
+    items.append({"n": 6, "kind": "list", "lines": lines, "multiple": multiple, "enabled": True,
+                  "selected": [sel] if sel > 0 else [], "rect": (10, 52, 250, 196)})
+    for k in range(min(3, len(names))):
+        if lined[k]:
+            y = (162, 122, 82)[k]
+            items.append({"n": 7 + k, "kind": "line", "enabled": False, "rect": (265, y, 355, y + 1)})
+    spec = {"title": "", "proc": 1, "width": 365, "height": 210, "default": 1,
+            "cancel": 2 if len(names) > 1 else None, "items": items}
     n, values = it.host.ditl_dialog(spec)
-    if n is None:
-        n = spec["cancel"] or len(names)
-    name = names[n - 1].rstrip("^") if 0 < n <= len(names) else ""
-    if spec["cancel"] == n:
-        return name + "\n"
-    return name + "\n" + ",".join(str(x) for x in values.get(nb + 2, []))
+    if n is None or not 1 <= n <= len(names):
+        n = spec["cancel"] or 1
+    chosen = values.get(6, spec["items"][len(names) + 1]["selected"])
+    return (names[n - 1] + "\n" + "".join("%d," % r for r in sorted(chosen)))[:-1]
+
+
+def _show_list_studium(it, a):
+    """Studium's ShowList(listText, delimiter, prompt, multiSelect,
+    "Button 1-4", textToSelect [, HorzPos, VertPos]): the delimiter is a
+    character code, or else its first character; the line equal to
+    textToSelect (in any case) starts selected, or else the first. Up to
+    four buttons in a column on the right, the first at the bottom
+    (Return), a ^ after a name drawing a line above it. Answers the
+    button's name, then each chosen line and its number ("text,2") on a
+    line of its own."""
+    form = "Form: ShowList(listText,delimiter,prompt,multiSelect,\"Button 1-4\",textToSelect,HorzPos,VertPos)"
+    if not 5 <= len(a) <= 8:
+        return form
+    d = int(ht.to_num(a[1])) if ht.is_number(a[1]) else 0
+    if d == 0:
+        d = ord(a[1][0].replace("\n", "\r")) if a[1] else 0
+    if d > 255:
+        return "List delimiters must be in the range 1-255"
+    delim = "\n" if d == 13 else chr(d)
+    lines = a[0].replace("\r", "\n").split(delim) if d else [a[0]]
+    if len(lines) > 1 and lines[-1] == "":
+        lines.pop()
+    names, lined = [], []
+    for name in a[4].split(",")[:4]:
+        lined.append(name.endswith("^"))
+        names.append(name[:-1] if name.endswith("^") else name)
+    want = a[5].lower() if len(a) > 5 else ""
+    sel = next((k + 1 for k, ln in enumerate(lines) if ln.lower() == want), 1)
+    items, top = [], 175
+    for k, name in enumerate(names):
+        if k and lined[k - 1]:
+            top -= 6
+        items.append({"n": k + 1, "kind": "button", "text": name, "enabled": True,
+                      "rect": (259, top, 349, top + 20)})
+        top -= 35
+    n = len(names)
+    items.append({"n": n + 1, "kind": "static", "text": a[2], "enabled": False, "rect": (15, 2, 349, 43)})
+    for k in range(n):
+        if lined[k]:
+            y = items[k]["rect"][1] - 11
+            items.append({"n": n + 2 + k, "kind": "line", "enabled": False, "rect": (259, y, 349, y + 1)})
+    items.append({"n": 10, "kind": "list", "lines": lines, "multiple": a[3].lower() == "true", "enabled": True,
+                  "selected": [sel], "rect": (15, 40, 224, 200)})
+    spec = {"title": "", "proc": 1, "width": 364, "height": 210, "default": 1, "cancel": None, "items": items}
+    hit, values = it.host.ditl_dialog(spec)
+    if hit is None or not 1 <= hit <= n:
+        hit = 1
+    chosen = sorted(values.get(10, [sel]))
+    return names[hit - 1] + "\n" + "".join("%s,%d\n" % (lines[r - 1], r) for r in chosen if 1 <= r <= len(lines))
 
 
 # -- speech (MacinTalk and PlainTalk externals) --------------------------------------------

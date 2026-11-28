@@ -1466,76 +1466,6 @@ def _new_window(tb, op):
     tb.ret32(_new_window_record(tb, storage, bounds, visible, refcon, 8))
 
 
-@tb_trap(0xA97D, 0xAA4B)
-def _new_dialog(tb, op):
-    """NewDialog and NewColorDialog."""
-    items = tb.m.pop32()
-    storage, bounds, visible, refcon = _pop_window_args(tb)
-    tb.ret32(_new_window_record(tb, storage, bounds, visible, refcon, 2, items))
-
-
-@tb_trap(0xA97C)
-def _get_new_dialog(tb, op):
-    m = tb.m
-    m.pop32()                   # behind
-    storage = m.pop32()
-    rid = m.pops16()
-    f, r = tb.find_res("DLOG", rid)
-    if r is None:
-        tb.res_err = resNotFound
-        return tb.ret32(0)
-    d = r[3]
-    bounds = list(struct.unpack(">4h", d[:8]))
-    items = tb.get_resource("DITL", struct.unpack(">h", d[18:20])[0])
-    if items:
-        data = bytes(m.rbytes(tb.heap.deref(items), tb.heap.size(items)))
-        items = tb.heap.new_handle(len(data), data=data)
-    tb.ret32(_new_window_record(tb, storage, bounds, d[10], struct.unpack(">i", d[14:18])[0], 2, items))
-
-
-def _ditl_items(m, heap, h):
-    """[(type, rect, data)] of a DITL handle."""
-    if not h or not heap.is_handle(h):
-        return []
-    d = bytes(m.rbytes(heap.deref(h), heap.size(h)))
-    out, pos = [], 2
-    for _i in range(struct.unpack(">h", d[:2])[0] + 1 if len(d) >= 2 else 0):
-        if pos + 14 > len(d):
-            break
-        rect = d[pos + 4:pos + 12]
-        typ, n = d[pos + 12], d[pos + 13]
-        out.append((typ, rect, d[pos + 14:pos + 14 + n]))
-        pos += 14 + n + (n & 1)
-    return out
-
-
-@tb_trap(0xA98D)
-def _get_ditem(tb, op):
-    m = tb.m
-    box, item, typ = m.pop32(), m.pop32(), m.pop32()
-    n = m.pops16()
-    dlg = m.pop32()
-    items = _ditl_items(m, tb.heap, m.r32(dlg + 156)) if dlg else []
-    if 1 <= n <= len(items):
-        t, rect, data = items[n - 1]
-        m.w16(typ, t)
-        m.wbytes(box, rect)
-        m.w32(item, tb.heap.new_handle(len(data), data=data) if t & 0x7F in (8, 16) else 0)
-    else:
-        m.w16(typ, 0)
-        m.w32(item, 0)
-        m.wbytes(box, bytes(8))
-
-
-@tb_trap(0xA990)
-def _get_itext(tb, op):
-    m = tb.m
-    s = m.pop32()
-    h = m.pop32()
-    data = bytes(m.rbytes(tb.heap.deref(h), tb.heap.size(h)))[:255] if h and tb.heap.is_handle(h) else b""
-    m.wpstr(s, data)
-
-
 @tb_trap(0xA917)
 def _get_wrefcon(tb, op):
     w = tb.m.pop32()
@@ -1602,8 +1532,8 @@ _NOOPS = {
     0xA850: 0, 0xA851: 4, 0xA852: 0, 0xA853: 0, 0xA856: 0, 0xA86E: 4,     # cursor, InitGraf
     0xA893: 4, 0xA894: 4, 0xA891: 4, 0xA892: 4,                         # MoveTo Move LineTo Line
     0xA8A1: 4, 0xA8A2: 4, 0xA8A3: 4, 0xA8A4: 4, 0xA8A5: 8,               # Frame/Paint/Erase/Invert/FillRect
-    0xA884: 8, 0xA885: 4, 0xA883: 2,                                     # DrawText DrawString DrawChar
-    0xA89B: 2, 0xA89C: 4, 0xA89D: 0, 0xA89E: 0, 0xA89F: 8,              # PenMode PenPat PenNormal ...
+    0xA884: 4, 0xA885: 8, 0xA883: 2,                                     # DrawString DrawText DrawChar
+    0xA89B: 4, 0xA89C: 2, 0xA89D: 4, 0xA89E: 0,                         # PenSize PenMode PenPat PenNormal
     0xA9B4: 0, 0xA9F1: 4, 0xA9F0: 0,                                     # SystemTask UnloadSeg
     0xA903: 2, 0xA8FE: 0,                                                # SetFontLock InitFonts
     0xA862: 4, 0xA863: 4,                                                # ForeColor BackColor
@@ -2254,14 +2184,12 @@ def _get_cursor(tb, op):
     tb.ret32(tb.get_resource("CURS", rid=rid))
 
 
-@tb_trap(0xA974)
+@tb_trap(0xA974, 0xA973, 0xA977)
 def _button(tb, op):
-    tb.ret_bool(False)
-
-
-@tb_trap(0xA973, 0xA977)
-def _still_down(tb, op):
-    tb.ret_bool(False)
+    """Button, StillDown and WaitMouseUp: the mouse as HCX's host has it
+    (`the mouse`)."""
+    host = tb.it.host if tb.it is not None else None
+    tb.ret_bool(bool(host is not None and host.mouse_is_down()))
 
 
 @tb_trap(0xA972)
@@ -2470,3 +2398,14 @@ def _script_util(tb, op):
 from . import filemgr  # noqa: E402
 
 filemgr.install(os_trap, tb_trap)
+
+
+# -- Dialog Manager, Control Manager and List Manager --------------------------------------------
+
+from . import dialogs  # noqa: E402
+
+dialogs.install(tb_trap, os_trap, _TB, _OS)
+
+from . import menus  # noqa: E402
+
+menus.install(tb_trap)

@@ -83,6 +83,46 @@ class Host(HostMixin):
             return self.replies.pop(0)
         return None
 
+    def ditl_dialog(self, spec, on_click=None):
+        """Records what the dialog shows (by kind of item, so that the
+        original's item numbers don't matter) and answers with the next of
+        .replies when it is a dict: {"button": "Cancel"} or {"item": 2}
+        closes it, "list": [2, 3] selects lines of its first list,
+        "edit": [...] and "check": [...] fill its fields and boxes in
+        order. Otherwise the default button, nothing changed."""
+        self.dialogs.append(["ditl"] + ditl_summary(spec))
+        self._mouse_down = False            # the click that opened it is over
+        n, values = HostMixin.ditl_dialog(self, spec)
+        if not (self.replies and isinstance(self.replies[0], dict)):
+            return n, values
+        r = self.replies.pop(0)
+        items = spec["items"]
+        if "button" in r:
+            hits = [i["n"] for i in items if i["kind"] == "button" and i.get("text") == r["button"]]
+            n = hits[0] if hits else None
+        elif "item" in r:
+            n = r["item"]
+        for kind, key in (("list", "list"), ("edit", "edit"), ("check", "check")):
+            if key not in r:
+                continue
+            these = [i["n"] for i in items if i["kind"] == kind or (kind == "check" and i["kind"] == "radio")]
+            vals = [r[key]] if kind == "list" else r[key]
+            for k, v in zip(these, vals):
+                values[k] = v
+        return n, values
+
+    def popup_menu(self, items, h, v):
+        """Records the menu's items and answers with the next of .replies
+        when it is {"pick": [line, subitem]} ({"pick": null} cancels);
+        otherwise the menu is cancelled."""
+        self.dialogs.append(["popup"] + [[i.get("text", ""), bool(i.get("enabled", True)), bool(i.get("checked"))]
+                                         + ([list(i["sub"])] if i.get("sub") else []) for i in items])
+        self._mouse_down = False
+        if self.replies and isinstance(self.replies[0], dict) and "pick" in self.replies[0]:
+            r = self.replies.pop(0)["pick"]
+            return tuple(r) if r else None
+        return None
+
     def wait(self, secs):
         pass
 
@@ -91,6 +131,25 @@ class Host(HostMixin):
 
     def script_error(self, text):
         self.lines.append("script error: " + text)
+
+
+_KINDS = ("static", "edit", "list", "check", "radio", "button", "line")
+
+
+def ditl_summary(spec):
+    """What a dialog shows, kind by kind, in the order of its items."""
+    out = []
+    for i in sorted(spec["items"], key=lambda i: (_KINDS.index(i["kind"]) if i["kind"] in _KINDS else 99, i["n"])):
+        k = i["kind"]
+        if k == "list":
+            out.append([k, i.get("lines", []), bool(i.get("multiple")), list(i.get("selected", []))])
+        elif k in ("check", "radio"):
+            out.append([k, i.get("text", ""), bool(i.get("checked"))])
+        elif k == "line":
+            out.append([k])
+        elif k in _KINDS:
+            out.append([k, i.get("text", "")])
+    return out
 
 
 def open_stack(path, name):
@@ -195,16 +254,19 @@ def sandbox(files):
     return snapshot
 
 
-def compare(h, name, kind, code, params, files=None, replies=None, clip=""):
+def compare(h, name, kind, code, params, files=None, replies=None, clip="", mouse=False):
     """Runs the original and the native with the same params, files,
-    dialog replies and clipboard, and prints whether result, files,
-    globals, clipboard and the dialogs shown are the same."""
+    dialog replies and clipboard (and the mouse button down, until a menu
+    or dialog is shown, when mouse is true: an external called from a
+    mouseDown handler), and prints whether result, files, globals,
+    clipboard and the dialogs shown are the same."""
     it = h.interp
     h.lines.clear()
     globs = dict(it.globals)
     snap = sandbox(files or {})
     h.replies, h.dialogs = list(replies or []), []
     h.set_clipboard(clip)
+    h._mouse_down = mouse
     emu = xcmdrun.emulate(it, name, kind, params, code)
     emu_files = snap()
     emu_globs = dict(it.globals)
@@ -215,6 +277,7 @@ def compare(h, name, kind, code, params, files=None, replies=None, clip=""):
     it.globals.update(globs)
     snap = sandbox(files or {})
     h.set_clipboard(clip)
+    h._mouse_down = mouse
     xcmds._EXT_OVERRIDE[name.lower()] = code
     try:
         nat = native(it, name, kind, params)
@@ -223,6 +286,7 @@ def compare(h, name, kind, code, params, files=None, replies=None, clip=""):
     nat_files = snap()
     nat_globs = dict(it.globals)
     nat_dialogs, nat_clip = h.dialogs, h.clipboard_text()
+    h._mouse_down = False
     it.globals.clear()
     it.globals.update(globs)
     same = emu.get("error") is None and nat.get("error") is None and \
