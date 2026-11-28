@@ -446,6 +446,8 @@ def _delete(tb, op):
             shutil.rmtree(path)
         else:
             os.remove(path)
+            if os.path.isfile(path + ".rsrc"):
+                os.remove(path + ".rsrc")      # the resource fork goes with it
     except OSError:
         return fm.done(pb, ioErr)
     fm.done(pb, noErr)
@@ -919,6 +921,28 @@ def _high_level_fs(tb, op):
             m.w32(spec + 2, parent)
             m.wpstr(spec + 6, _to_mac_name(leaf), 63)
             err = noErr if os.path.lexists(path) else fnfErr
+    elif sel in (4, 5):     # FSpCreate(spec, creator, fileType, scriptTag) / FSpDirCreate(spec, scriptTag, VAR dirID)
+        out = m.pop32() if sel == 5 else 0
+        m.pop16()           # scriptTag
+        if sel == 4:
+            ftype, creator = m.rbytes(m.sp, 4), m.rbytes(m.sp + 4, 4)
+            m.sp = m.sp + 8
+        err, path, v = _spec_path(fm, m, m.pop32())
+        if not err:
+            if os.path.lexists(path):
+                err = dupFNErr
+            elif not os.path.isdir(os.path.dirname(path)):
+                err = dirNFErr
+            else:
+                try:
+                    if sel == 5:
+                        os.mkdir(path)
+                        m.w32(out, fm.dir_id(v, path))
+                    else:
+                        open(path, "xb").close()
+                        fm.set_finfo(path, ftype, creator)
+                except OSError:
+                    err = ioErr
     elif sel == 6:          # FSpDelete(spec)
         err, path, v = _spec_path(fm, m, m.pop32())
         if not err:

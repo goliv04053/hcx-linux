@@ -1013,54 +1013,253 @@ def path_info(it, a):
     With no parameter it reads the path from the global xyzTempGlobal, as
     Voyager's other externals call it. The vRefNum is HyperCard's -1 printed
     unsigned, like the original."""
-    path = str(_arg(a, 0)) if a else str(it.globals.get("xyztempglobal", ""))
+    where = _path_info_parts(it, str(_arg(a, 0)) if a else str(it.globals.get("xyztempglobal", "")))
+    if where is None:
+        return "0,0,"
+    return "4294967295,%d,%s" % (_dir_id(where[0]), where[1])
+
+
+def _path_info_parts(it, path):
+    """(folder on disk, last name) as GetPathInfo sees a path, or None."""
+    import zlib
     path = path.rstrip(":") if path.count(":") > 1 or not path.endswith(":") else path
     vol, _, rest = path.partition(":")
     leaf = rest.rsplit(":", 1)[-1] if rest else ""
-    parent = _local(vol + ":" + rest.rsplit(":", 1)[0]) if ":" in rest else _local(vol)
-    if not os.path.isdir(parent):
-        return "0,0,"
-    return "4294967295,%d,%s" % (_dir_id(parent), leaf)
+    if not vol or (not leaf and zlib.crc32(_ext_code(it, "GetPathInfo")) == 0x6C6344FD):
+        return None             # (the READ ME FIRST stack's version wants a name)
+    err, parent = _mac_resolve(vol + ":" + rest.rsplit(":", 1)[0] if ":" in rest else vol + ":")
+    if err or not os.path.isdir(parent):
+        return None
+    return parent, leaf
+
+
+def _fs_delete(path):
+    """Deletes what a Mac path names, as the File Manager's FSDelete does,
+    and returns its result code: 0, or -35 (no such volume), -120 (folder
+    not found), -43 (file not found), -47 (a volume or a folder that is not
+    empty). A name without a colon is in the default folder, the top of the
+    first volume. The resource fork HCX keeps next to a file goes with it."""
+    err, local = _mac_resolve(path if ":" in path else ":" + path)
+    if err:
+        return {"nsv": -35, "dirnf": -120, "bdnam": -37}[err]
+    if path.endswith(":") and not os.path.isdir(local):
+        return -120
+    return _fs_delete_local(local)
+
+
+def _fs_delete_local(local):
+    if not os.path.lexists(local):
+        return -43
+    if _is_volume(local) or (os.path.isdir(local) and any(not n.startswith(".") for n in os.listdir(local))):
+        return -47
+    try:
+        if os.path.isdir(local):
+            os.rmdir(local)
+        else:
+            os.remove(local)
+            if os.path.isfile(local + ".rsrc"):
+                os.remove(local + ".rsrc")
+    except OSError:
+        return -36
+    return 0
+
+
+_DELETEFILE_ERRS = {-58: "External File System", -47: "File Busy", -46: "Software Volume Lock",
+                    -45: "File Locked", -44: "Disk Is Locked", -43: "File Not Found",
+                    -37: "Bad File Name", -36: "I/O Error", -35: "No Such Volume"}
 
 
 @xcmd("DeleteFile", "FileDelete")
 def delete_file(it, a):
-    p = _local(_arg(a, 0))
-    root = _local("")
-    if not os.path.abspath(p).startswith(os.path.dirname(root)):
-        it.result = "Can't delete files outside HCX's folder."
-        return
-    try:
-        if os.path.isdir(p):
-            os.rmdir(p)         # like the File Manager: only an empty folder
+    """DeleteFile path: the versions of the test stacks (HyperBBS's, the
+    Gibson Library's, the Core Collection's, which asks for the file in a
+    file dialog, Didacticiel's and the File/Volume XCMDs'), told apart by
+    their messages, each with its own errors in "the result". Folders go
+    only if empty. Checked against the originals in tools/xemu."""
+    import zlib
+    a = [str(x) for x in a]
+    code = _ext_code(it, "DeleteFile") or _ext_code(it, "FileDelete")
+    if b"FSDelete returned error" in code:            # HyperBBS
+        if len(a) != 1:
+            it.result = "parameter count is not 1"
+        elif _fs_delete(a[0]):
+            it.result = "FSDelete returned error"
+    elif b"xyzTempGlobal" in code:                    # the Gibson Library: through GetPathInfo
+        if len(a) == 1:
+            it.globals["xyztempglobal"] = ""
+            where = _path_info_parts(it, a[0])
+            if where is None or _fs_delete_in(*where):
+                it.result = "File not deleted"
+    elif zlib.crc32(code) == 0x3D386F9A:              # the Core Collection: any file the user picks
+        r = it.host.choose_file("file", "", "", None)
+        if r:
+            _fs_delete(r)
+    elif b"Filename Parameter Missing" in code:       # Didacticiel
+        if not a:
+            it.result = "Filename Parameter Missing"
+        elif len(a) > 1:
+            it.result = "Incorrect Parameter Count"
         else:
-            os.remove(p)
-    except OSError:
+            e = _fs_delete(a[0])
+            if e:
+                it.result = _DELETEFILE_ERRS.get(e) or "Unknown Error: %d" % (e & 0xFFFFFFFF)
+    elif b"Unable to delete file" in code:            # the File/Volume XCMDs
+        e = _fs_delete(a[0] if a else "")
+        if e:
+            it.result = "Error: Unable to delete file: %d" % e
+    elif _fs_delete(a[0] if a else ""):
         it.result = "File not deleted"
+
+
+@xfcn("DeleteFile")
+def delete_file_fn(it, a):
+    """The DeleteFile XFCN of Best of HC Externals: deletes the file of a
+    full path; 0, the File Manager's error (unsigned), or 1 when the
+    parameter is missing or not a full path."""
+    a = [str(x) for x in a]
+    if len(a) != 1 or ":" not in a[0]:
+        return "1"
+    if a[0].startswith(":"):
+        return str(-35 & 0xFFFFFFFF)
+    return str(_fs_delete(a[0]) & 0xFFFFFFFF)
+
+
+def _fs_delete_in(parent, leaf):
+    """FSDelete of a name in a folder (HDelete), the Mac way."""
+    if not leaf:
+        return -47 if _is_volume(parent) else _fs_delete_local(parent)
+    if ":" in leaf:
+        return -120
+    return _fs_delete_local(_ci_match(parent, leaf.replace("/", "_")))
 
 
 @xcmd("CreateFolder", "NewFolder", "MakeFolder")
 def create_folder(it, a):
-    """CreateFolder folder path, name (Voyager's Library) or CreateFolder
-    full path (other stacks)."""
+    """CreateFolder: Frederic Rinaldi's 1.1 to 1.3 (CreateFolder <folder
+    path>), the Gibson Library's (CreateFolder folder path, name) and
+    Intellimation's (createFolder <path>). Other versions and the other
+    names take a full path and make the folders on the way. Checked
+    against the originals in tools/xemu."""
+    a = [str(x) for x in a]
+    code = _ext_code(it, "CreateFolder")
+    if b"xyzTempGlobal" in code:
+        r = _create_folder_gibson(it, a)
+    elif b"Intellimation" in code:
+        r = _create_folder_intellimation(a)
+    elif b"RINALDI" in code:
+        r = _create_folder_rinaldi(a, _rinaldi_version(code, "CreateFolder"))
+    else:
+        r = _create_folder_any(a)
+    if r is not None:
+        it.result = r
+
+
+def _new_folder(path):
+    """Makes the folder that a Mac path names ("" or an error code as
+    in _mac_resolve, plus "dup"). A name without a colon is in the default
+    folder, the top of the first volume, as on the Mac."""
+    if ":" not in path:
+        path = ":" + path
+    err, local = _mac_resolve(path)
+    if err:
+        return err
+    if os.path.lexists(local):
+        return "dup"
+    try:
+        os.mkdir(local)
+    except OSError:
+        return "dirnf"
+    return ""
+
+
+def _create_folder_rinaldi(a, ver):
+    if ver == (0, 0):
+        ver = (1, 3)
+    if len(a) == 1 and a[0] in ("?", "!", "="):
+        years = {(1, 1): "1990,1991", (1, 2): "1990…1992"}.get(ver, "1990…1999")
+        return {"?": ("68K_" if ver >= (1, 3) else "") + "CreateFolder <folder path>",
+                "!": "Version %d.%d, © Frederic RINALDI %s" % (ver + (years,)),
+                "=": "<error> if any"}[a[0]]
+    if not a or not a[0]:
+        return "Error : Missing or empty parameter"
+    path = a[0]
+    if ver < (1, 2):        # 1.1 first looks for the volume the path starts with
+        from .hthost import files_root
+        vol = path.split(":")[0]
+        if not vol or not os.path.isdir(_ci_match(files_root(), vol.replace("/", "_"))):
+            return "Error : Volume not found"
+    if path.endswith(":"):
+        path = path[:-1]
+    err = _new_folder(path)
+    return "Error : " + _RINALDI_ERR[err] if err else None
+
+
+def _create_folder_gibson(it, a):
+    """The Library's: the folder named by the 2nd param inside the one of
+    the 1st, through its GetPathInfo XFCN and the global xyzTempGlobal
+    (left empty); "the result" is empty or one of its messages."""
+    if len(a) != 2:
+        return ""
+    it.globals["xyztempglobal"] = ""
+    path, name = a
+    err, folder = _mac_resolve(path) if path else ("dirnf", None)
+    if err or not os.path.lexists(folder):
+        return "Could not get directory id."
+    name = name[1:] if name.startswith(":") else name
+    if not name or ":" in name or not os.path.isdir(folder):
+        return "Could not create new folder."
+    target = _ci_match(folder, name.replace("/", "_"))
+    if os.path.lexists(target):
+        return "Could not create new folder."
+    try:
+        os.mkdir(target)
+    except OSError:
+        return "Could not create new folder."
+    return ""
+
+
+def _create_folder_intellimation(a):
+    """Through FSMakeFSSpec and FSpDirCreate: their error numbers, and a
+    name cut to 31 characters."""
+    if not a or a[0] in ("?", "!"):
+        return "createFolder <path> -- ©1996 Intellimation"
+    path = a[0]
+    if ":" not in path:
+        return "Error: Invalid path #-35"
+    codes = {"nsv": -35, "dirnf": -120, "bdnam": -37, "dup": -48}
+    err, local = _mac_resolve(path)
+    if not err and path.endswith(":") and not os.path.isdir(local):
+        err = "dirnf"
+    if err:
+        return "Error: Invalid path #%d" % codes[err]
+    local = os.path.join(os.path.dirname(local), os.path.basename(local)[:31])
+    if os.path.lexists(local):
+        return "Error: Failed to create #-48"
+    try:
+        os.mkdir(local)
+    except OSError:
+        return "Error: Failed to create #-120"
+    return None
+
+
+def _create_folder_any(a):
     if len(a) >= 2:
         parent = _local(_arg(a, 0).rstrip(":") or _arg(a, 0))
         if not os.path.isdir(parent):
-            it.result = "Could not get directory id."
-            return
+            return "Could not get directory id."
         p = os.path.join(parent, str(_arg(a, 1)).replace("/", "_").replace(":", "_"))
         if os.path.exists(p):
-            it.result = "Could not create new folder."
-            return
+            return "Could not create new folder."
         try:
             os.mkdir(p)
         except OSError:
-            it.result = "Could not create new folder."
-        return
+            return "Could not create new folder."
+        return None
     try:
         os.makedirs(_local(_arg(a, 0)), exist_ok=True)
     except OSError as e:
-        it.result = str(e)
+        return str(e)
+    return None
 
 
 # -- Finder info and Mac paths, for Frederic Rinaldi's file externals --------------------------

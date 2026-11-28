@@ -885,7 +885,7 @@ def _palette_dispatch(tb, op):
 
 _GESTALT = {
     "sysv": 0x0755, "qd  ": 0x0230, "proc": 3, "fpu ": 1, "mmu ": 2, "ram ": 64 << 20,
-    "lram": 64 << 20, "vm  ": 0, "addr": 0, "tabl": 0, "font": 0, "fs  ": 0, "hfs ": 1,
+    "lram": 64 << 20, "vm  ": 0, "addr": 0, "tabl": 0, "font": 0, "fs  ": 3, "hfs ": 1,
     "evnt": 0, "sysa": 1, "cput": 2, "mach": 9, "kbd ": 2, "ppc ": 0, "alis": 1, "fold": 1,
     "drag": 0, "appr": 0, "dict": 0, "edtn": 0, "help": 1, "icmp": 0, "qtim": 0,
 }
