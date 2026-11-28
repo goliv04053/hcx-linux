@@ -40,8 +40,9 @@ from . import mac68k, xcmdrun  # noqa: E402
 
 class Host(HostMixin):
     """Just enough of a window for the interpreter: answers and asks take
-    their defaults (or the next of .replies, None cancelling an ask), and
-    log lines and dialogs are collected."""
+    their defaults (or the next of .replies, None cancelling an ask; a file
+    dialog takes a Mac path from .replies, or is cancelled), and log lines
+    and dialogs are collected."""
 
     def __init__(self, st):
         self.stack = st
@@ -74,6 +75,13 @@ class Host(HostMixin):
         if self.replies:
             return self.replies.pop(0)
         return default
+
+    def choose_file(self, kind, prompt="", default="", patterns=None):
+        self.dialogs.append(["choose_file", kind, str(prompt), str(default),
+                             patterns[0] if patterns else None])
+        if self.replies:
+            return self.replies.pop(0)
+        return None
 
     def wait(self, secs):
         pass

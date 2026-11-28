@@ -746,36 +746,107 @@ def _bit_shift(tb, op):
     tb.ret32((v << count) if count >= 0 else (v >> -count))
 
 
+def _sf_choose(tb, kind, prompt, default, types):
+    """Asks HCX's host for a file, as the natives do (host.choose_file);
+    returns (path on disk, vRefNum, dirID, name) or None if cancelled."""
+    from hcx import xcmds
+    from hcx.hthost import mac_to_local
+    from . import filemgr
+    host = tb.it.host if tb.it is not None else None
+    if host is None:
+        return None
+    pats = None if types is None else xcmds._patterns(types)
+    r = host.choose_file(kind, prompt, default, pats)
+    if not r:
+        return None
+    fm = filemgr._fm(tb)
+    path = os.path.realpath(mac_to_local(r))
+    if not fm.inside(path):
+        return None
+    vref = fm.vol_of(path)
+    folder = os.path.dirname(path)
+    return path, vref, fm.dir_id(vref, folder), os.path.basename(path)
+
+
+def _sf_pstr(m, p):
+    from .xcmdrun import from_mac
+    return from_mac(m.pstr(p)) if p else ""
+
+
+def _sf_types(m, num, p):
+    if num < 0:
+        return None
+    return [m.rbytes(p + 4 * i, 4).decode("latin-1") for i in range(num)]
+
+
 @tb_trap(0xA9EA)
 def _pack3(tb, op):
-    """Standard File. tools/xemu has no screen, so the user always clicks
-    Cancel (reply.good false), as HCX's headless host does."""
+    """Standard File, through HCX's own file dialog (host.choose_file,
+    which in tools/xemu/compare.py takes the case's replies). A folder
+    becomes a working directory in the old SFReply, as on the Mac."""
+    from . import filemgr
+    from .xcmdrun import to_mac
     m = tb.m
     sel = m.pop16()
-    if sel in (2, 4):           # SFGetFile / SFPGetFile
-        if sel == 4:
-            m.pop32()           # filterProc
+    if sel in (1, 2, 3, 4):     # SFPutFile, SFGetFile, SFPPutFile, SFPGetFile
+        if sel in (3, 4):
+            m.pop32()           # dlgHook / filterProc
             m.pop16()           # dlgID
         reply = m.pop32()
-        m.pop32()               # dlgHook
-        m.pop32()               # typeList
-        m.pop16()               # numTypes
-        m.pop32()               # fileFilter
-        m.pop32()               # prompt
+        m.pop32()               # dlgHook (put) / dlgHook (get)
+        if sel in (2, 4):
+            types = _sf_types(m, *reversed((m.pop32(), m.pops16())))
+            m.pop32()           # fileFilter
+            prompt = _sf_pstr(m, m.pop32())
+            default = ""
+        else:
+            orig = m.pop32()
+            prompt = _sf_pstr(m, m.pop32())
+            default, types = _sf_pstr(m, orig), None
         m.pop32()               # where
-    elif sel in (1, 3):         # SFPutFile / SFPPutFile
-        if sel == 3:
-            m.pop32()
-            m.pop16()
+        got = _sf_choose(tb, "file" if sel in (2, 4) else "save", prompt, default, types)
+        m.wbytes(reply, bytes(74))
+        if got:
+            path, vref, dirid, name = got
+            fm = filemgr._fm(tb)
+            m.w8(reply, 1)
+            if sel in (2, 4) and os.path.exists(path):
+                m.wbytes(reply + 2, fm.get_finfo(path)[0])
+            m.w16(reply + 6, filemgr._new_wd(fm, vref, dirid))
+            raw = to_mac(name)[:63]
+            m.w8(reply + 10, len(raw))
+            m.wbytes(reply + 11, raw)
+            m.w16(0x214, -vref & 0xFFFF)        # SFSaveDisk
+            m.w32(0x398, dirid)                 # CurDirStore
+        return
+    if sel in (5, 6):           # StandardPutFile, StandardGetFile
         reply = m.pop32()
-        m.pop32()               # dlgHook
-        m.pop32()               # origName
-        m.pop32()               # prompt
-        m.pop32()               # where
-    else:
-        raise Unimplemented("Pack3 selector %d" % sel)
-    m.w8(reply, 0)              # good
-    m.w8(reply + 1, 0)          # copy
+        if sel == 6:
+            types = _sf_types(m, *reversed((m.pop32(), m.pops16())))
+            m.pop32()           # fileFilter
+            prompt = default = ""
+        else:
+            dflt = m.pop32()
+            prompt = _sf_pstr(m, m.pop32())
+            default, types = _sf_pstr(m, dflt), None
+        got = _sf_choose(tb, "file" if sel == 6 else "save", prompt, default, types)
+        m.wbytes(reply, bytes(88))
+        if got:
+            path, vref, dirid, name = got
+            fm = filemgr._fm(tb)
+            m.w8(reply, 1)
+            m.w8(reply + 1, 1 if sel == 5 and os.path.exists(path) else 0)
+            if os.path.exists(path):
+                m.wbytes(reply + 2, fm.get_finfo(path)[0])
+            m.w16(reply + 6, vref)
+            m.w32(reply + 8, dirid)
+            raw = to_mac(name)[:63]
+            m.w8(reply + 12, len(raw))
+            m.wbytes(reply + 13, raw)
+            m.w16(0x214, -vref & 0xFFFF)
+            m.w32(0x398, dirid)
+        return
+    raise Unimplemented("Pack3 selector %d" % sel)
 
 
 @tb_trap(0xA815)
@@ -1239,6 +1310,25 @@ def _unique_id(tb, op):
     tb.ret16(n)
 
 
+@tb_trap(0xA906)
+def _new_string(tb, op):
+    """NewString(s): StringHandle"""
+    m = tb.m
+    p = m.pop32()
+    raw = m.rbytes(p, m.r8(p) + 1)
+    tb.ret32(tb.heap.new_handle(len(raw), data=raw))
+
+
+@tb_trap(0xA907)
+def _set_string(tb, op):
+    """SetString(h, s)"""
+    m = tb.m
+    p, h = m.pop32(), m.pop32()
+    raw = m.rbytes(p, m.r8(p) + 1)
+    tb.heap.set_size(h, len(raw))
+    m.wbytes(tb.heap.deref(h), raw)
+
+
 @tb_trap(0xA9BA)
 def _get_string(tb, op):
     rid = tb.m.pops16()
@@ -1532,10 +1622,11 @@ for _t, _n in _NOOPS.items():
 
 for _t, _n in {0xA914: 4, 0xA92D: 4, 0xA915: 4, 0xA916: 4, 0xA91F: 4, 0xA920: 4, 0xA91A: 8,
                0xA922: 4, 0xA923: 4, 0xA928: 4, 0xA92A: 4, 0xA969: 4, 0xA981: 4, 0xA982: 4,
-               0xA983: 4, 0xA98E: 16, 0xA98F: 8, 0xA9CE: 14, 0xA904: 4, 0xA927: 4}.items():
+               0xA983: 4, 0xA98E: 16, 0xA98F: 8, 0xA9CE: 14, 0xA904: 4, 0xA927: 4,
+               0xA91B: 10}.items():
     # DisposeWindow CloseWindow ShowWindow HideWindow SelectWindow BringToFront SetWTitle
     # BeginUpdate EndUpdate InvalRect ValidRect DrawControls DrawDialog CloseDialog
-    # DisposeDialog SetDItem SetIText TextBox DrawGrowIcon InvalRgn
+    # DisposeDialog SetDItem SetIText TextBox DrawGrowIcon InvalRgn MoveWindow
     _TB[_t & 0x3FF] = _noop_factory(_n)
 
 

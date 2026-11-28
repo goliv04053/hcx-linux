@@ -2830,19 +2830,57 @@ _TYPE_PATTERNS = {
 
 
 def _patterns(types):
+    """The file dialog filter (name, globs) for a list of Mac file types:
+    every type HCX knows an extension for, or None (all files)."""
+    names, globs = [], []
     for t in types:
         t = str(t).strip().upper()
-        if t in _TYPE_PATTERNS:
-            return _TYPE_PATTERNS[t]
-        if t[:3] == "SND":
-            return _TYPE_PATTERNS["SND "]
-    return None
+        t = "SND " if t[:3] == "SND" else t
+        if t in _TYPE_PATTERNS and _TYPE_PATTERNS[t][0] not in names:
+            names.append(_TYPE_PATTERNS[t][0])
+            globs += _TYPE_PATTERNS[t][1]
+    return (", ".join(names), globs) if names else None
 
 
-@xfcn("FileName", "GetFileName", "SFGetFile", "GetFile", "FilePath", "FileOpen")
-def file_name(it, a):
-    """FileName(["TYPE"...]): the full path of a file the user picks, or empty."""
+@xfcn("GetFileName", "SFGetFile", "GetFile", "FilePath", "FileOpen")
+def get_file_name(it, a):
+    """GetFileName(["TYPE"...]) and the like: the full path of a file the
+    user picks, or empty."""
     return it.host.choose_file("file", "", "", _patterns(a)) or ""
+
+
+# The FileName XFCNs of the test stacks, by the CRC-32 of their code: how
+# each reads its parameters. "first": only the first parameter is a file
+# type, its first 4 characters ("prefix") or only if it has exactly 4
+# ("exact"); "one": only when it is the only parameter; "two": only when
+# there are no more than two; "prompt": the second parameter is the
+# dialog's prompt; "all": every parameter is a type.
+_FILENAME_RULES = {
+    0xB7451A5E: "first prefix prompt", 0xB0478AFA: "first prefix", 0xF526F549: "first prefix",
+    0x107926BB: "first prefix", 0x28C6D475: "first prefix", 0xBF97B84D: "first prefix one",
+    0x05B7AB82: "first exact", 0x6A6D9D90: "first exact", 0xD95ADEB7: "first exact",
+    0xC325A2ED: "first exact", 0x0E812A9F: "first exact two", 0xD6FBC77E: "all prefix",
+}
+
+
+@xfcn("FileName")
+def file_name(it, a):
+    """FileName(["TYPE"...]): the full path of a file the user picks in a
+    file dialog, or empty if cancelled. The twelve versions in the test
+    stacks differ only in how they read the file types (see
+    _FILENAME_RULES); an unknown one reads them like the most common.
+    Checked against the originals in tools/xemu."""
+    import zlib
+    code = _ext_code(it, "FileName")
+    rule = _FILENAME_RULES.get(zlib.crc32(code), "first prefix").split()
+    a = [str(x) for x in a]
+    if ("one" in rule and len(a) != 1) or ("two" in rule and len(a) > 2):
+        types = []
+    else:
+        types = a if "all" in rule else a[:1]
+        types = [t[:4] for t in types if len(t) >= 4] if "prefix" in rule else [t for t in types if len(t) == 4]
+    prompt = a[1] if "prompt" in rule and len(a) >= 2 else ""
+    return it.host.choose_file("file", prompt, "", _patterns(types)) or ""
 
 
 @xfcn("NewFileName", "SFPutFile", "PutFile", "SaveFileName")

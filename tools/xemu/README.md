@@ -17,7 +17,11 @@ usa).
 `ARQUIVO` é qualquer coisa que o HCX abre (pilha, .sit, imagem de disco).
 Rode da raiz do repositório com o Python que tem GTK. Os arquivos que os
 externos leem e gravam ficam numa pasta temporária, nunca em
-`~/.local/share/hcx`. As globais que o externo muda e a área de transferência também são comparadas.
+`~/.local/share/hcx`. As globais que o externo muda, a área de
+transferência e os diálogos que ele mostra também são comparados. Os
+diálogos de arquivo (Standard File) são cancelados, a não ser que o caso
+traga respostas: no `compare()` de Python, `replies=["HD:Notas:a.txt"]`
+escolhe esse arquivo.
 `XEMU_TRACE=1` mostra cada callback e, quando o código 68k falha, as últimas
 instruções que rodaram antes.
 
@@ -40,8 +44,8 @@ Exemplo de `CASOS.json` com arquivos de teste:
   baixa e do QuickDraw.
 - `toolbox.py`: os traps da Toolbox (memória, recursos, strings, datas,
   QuickDraw de retângulos, tela, TextEdit sem desenho, Scrap Manager sobre
-  a área de transferência do HCX, International Utilities e Script Manager
-  para o script romano) e `filemgr.py`, o File Manager sobre a pasta
+  a área de transferência do HCX, Standard File pelo diálogo de arquivo do
+  HCX, International Utilities e Script Manager para o script romano) e `filemgr.py`, o File Manager sobre a pasta
   temporária.
 - `sane.py`: o SANE, ponto flutuante do Mac (Pack4 e as conversões decimais
   do Pack7), com a precisão de um double do Python.
