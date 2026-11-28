@@ -1694,7 +1694,10 @@ def _file_copy(it, a):
     Checked against the originals in tools/xemu. One bug is left out on
     purpose: 1.2, 2.7 and later empty a file copied onto itself with
     replace true; here the file stays as it is. (1.3's habit of adding the
-    file's name to a destination file that exists is kept.)"""
+    file's name to a destination file that exists is kept.) 3.8 never
+    stores the size of its copy buffer where its copy loop reads it (an
+    optimizer slip), so it reads whatever the stack holds and may hang;
+    here 3.8 copies like 3.7."""
     import shutil
     from .hthost import local_to_mac
     code = _ext_code(it, "FileCopy")

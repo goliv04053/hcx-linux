@@ -6,6 +6,7 @@ externals; HCX itself never runs 68k code.
   python3 -m tools.xemu.compare FILE STACK --list
   python3 -m tools.xemu.compare FILE STACK NAME [PARAM ...]
   python3 -m tools.xemu.compare FILE STACK --batch CASES.json
+  python3 -m tools.xemu.compare FILE STACK --dump NAME CODE.bin
 
 FILE is anything HCX opens (a stack, an archive, a disk image); STACK is
 the name of a stack inside it. CASES.json is a list of [NAME, [PARAM...]],
@@ -246,6 +247,14 @@ def main(argv):
     if len(argv) < 3:
         print(__doc__)
         return 2
+    if argv[2] == "--dump" and len(argv) == 5:     # the 68k code, for tools/ghidra
+        mf, _h = open_stack(argv[0], argv[1])
+        hits = [d for t, i, n, d in externals(mf) if n.lower() == argv[3].lower()]
+        if not hits:
+            print("? %s: not in this stack" % argv[3])
+            return 1
+        open(argv[4], "wb").write(hits[0])
+        return 0
     if not mac68k.available():
         print("build the emulator first: sh tools/xemu/cpu/build.sh")
         return 1

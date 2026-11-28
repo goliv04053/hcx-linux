@@ -65,6 +65,37 @@ void hcx_history(unsigned int *out)
         out[i] = history[(icount + i) & 1023];
 }
 
+/* A write watch, for debugging: writes into [watch_lo, watch_hi) are
+ * logged with the instruction that made them. */
+static unsigned int watch_lo, watch_hi;
+#define WATCH_MAX 4096
+static unsigned int watch_log[WATCH_MAX][4];   /* pc, address, value, size */
+static int watch_n;
+
+void hcx_watch(unsigned int lo, unsigned int hi) { watch_lo = ADDR(lo); watch_hi = hi ? ADDR(hi) : 0; watch_n = 0; }
+
+/* Copies up to max entries of the watch log; returns how many writes there were. */
+int hcx_watch_log(unsigned int *out, int max)
+{
+    int n = watch_n < max ? watch_n : max;
+    n = n < WATCH_MAX ? n : WATCH_MAX;
+    memcpy(out, watch_log, n * sizeof watch_log[0]);
+    return watch_n;
+}
+
+static void watched(unsigned int a, unsigned int v, unsigned int size)
+{
+    if (a + size > watch_lo && a < watch_hi) {
+        if (watch_n < WATCH_MAX) {
+            watch_log[watch_n][0] = m68k_get_reg(NULL, M68K_REG_PPC);
+            watch_log[watch_n][1] = a;
+            watch_log[watch_n][2] = v;
+            watch_log[watch_n][3] = size;
+        }
+        watch_n++;
+    }
+}
+
 /* Memory access for Musashi (big-endian). */
 unsigned int m68k_read_memory_8(unsigned int a) { return mem[ADDR(a)]; }
 unsigned int m68k_read_memory_16(unsigned int a)
@@ -76,16 +107,26 @@ unsigned int m68k_read_memory_32(unsigned int a)
 {
     return (m68k_read_memory_16(a) << 16) | m68k_read_memory_16(a + 2);
 }
-void m68k_write_memory_8(unsigned int a, unsigned int v) { mem[ADDR(a)] = v; }
-void m68k_write_memory_16(unsigned int a, unsigned int v)
+static void wr16(unsigned int a, unsigned int v)
 {
     mem[ADDR(a)] = v >> 8;
     mem[ADDR(a + 1)] = v;
 }
+void m68k_write_memory_8(unsigned int a, unsigned int v)
+{
+    if (watch_hi) watched(ADDR(a), v & 0xFF, 1);
+    mem[ADDR(a)] = v;
+}
+void m68k_write_memory_16(unsigned int a, unsigned int v)
+{
+    if (watch_hi) watched(ADDR(a), v & 0xFFFF, 2);
+    wr16(a, v);
+}
 void m68k_write_memory_32(unsigned int a, unsigned int v)
 {
-    m68k_write_memory_16(a, v >> 16);
-    m68k_write_memory_16(a + 2, v & 0xFFFF);
+    if (watch_hi) watched(ADDR(a), v, 4);
+    wr16(a, v >> 16);
+    wr16(a + 2, v & 0xFFFF);
 }
 unsigned int m68k_read_disassembler_8(unsigned int a) { return m68k_read_memory_8(a); }
 unsigned int m68k_read_disassembler_16(unsigned int a) { return m68k_read_memory_16(a); }

@@ -81,6 +81,9 @@ def library():
                 lib.hcx_disasm.argtypes = [ctypes.c_uint, ctypes.c_char_p]
                 if hasattr(lib, "hcx_history"):
                     lib.hcx_history.argtypes = [ctypes.c_void_p]
+                if hasattr(lib, "hcx_watch"):
+                    lib.hcx_watch.argtypes = [ctypes.c_uint, ctypes.c_uint]
+                    lib.hcx_watch_log.argtypes = [ctypes.c_void_p, ctypes.c_int]
                 lib.hcx_disasm.restype = ctypes.c_uint
                 _LIB = lib
                 break
@@ -378,6 +381,16 @@ class Machine:
         buf = (ctypes.c_uint * 1024)()
         self.lib.hcx_history(buf)
         return [a & 0xFFFFFF for a in buf]
+
+    def watch(self, lo, hi):
+        """Logs every write into [lo, hi) from now on (hi 0: stop)."""
+        self.lib.hcx_watch(lo, hi)
+
+    def watch_log(self, n=4096):
+        """[(pc, address, value, size)] of the watched writes."""
+        buf = (ctypes.c_uint * (4 * n))()
+        total = self.lib.hcx_watch_log(buf, n)
+        return [tuple(buf[4 * i:4 * i + 4]) for i in range(min(total, n))]
 
 
 class Heap:

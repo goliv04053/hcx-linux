@@ -1,0 +1,12 @@
+--- a/68020.slaspec
++++ b/68020.slaspec
+@@ -1 +1,9 @@
+ @include "68000.sinc"
++
++# Macintosh A-line traps (Toolbox and OS calls), added for HCX analysis:
++# each trap word calls a stub at 0xF00000 + (trap & 0xFFF) * 4 that the
++# MacTraps script names and types. OS traps (bit 11 clear) return with the
++# flags set from D0.W.
++atrapdest: addr is op015 [ addr = 0xF00000 + (op015 & 0xFFF) * 4; ] { export *[ram]:4 addr; }
++:ATRAP atrapdest is op=0xa & op11=0 & atrapdest { call atrapdest; ZF = (D0w == 0); NF = (D0w s< 0); VF = 0; CF = 0; }
++:ATRAP atrapdest is op=0xa & op11=1 & atrapdest { call atrapdest; }

@@ -1,0 +1,111 @@
+--- a/68000.cspec
++++ b/68000.cspec
+@@ -75,5 +75,108 @@
+       </killedbycall>
+     </prototype>
+   </default_proto>
++
++    <prototype name="mac_os" extrapop="unknown" stackshift="0">
++      <input>
++        <pentry minsize="1" maxsize="4">
++          <register name="A0"/>
++        </pentry>
++        <pentry minsize="1" maxsize="4">
++          <register name="D0"/>
++        </pentry>
++      </input>
++      <output>
++        <pentry minsize="1" maxsize="4">
++          <register name="D0"/>
++        </pentry>
++      </output>
++      <unaffected>
++        <register name="D1"/>
++        <register name="D2"/>
++        <register name="D3"/>
++        <register name="D4"/>
++        <register name="D5"/>
++        <register name="D6"/>
++        <register name="D7"/>
++        <register name="A0"/>
++        <register name="A1"/>
++        <register name="A2"/>
++        <register name="A3"/>
++        <register name="A4"/>
++        <register name="A5"/>
++        <register name="A6"/>
++        <register name="SP"/>
++      </unaffected>
++      <killedbycall>
++        <register name="D0"/>
++      </killedbycall>
++    </prototype>
++    <prototype name="mac_os_a0" extrapop="unknown" stackshift="0">
++      <input>
++        <pentry minsize="1" maxsize="4">
++          <register name="A0"/>
++        </pentry>
++        <pentry minsize="1" maxsize="4">
++          <register name="D0"/>
++        </pentry>
++      </input>
++      <output>
++        <pentry minsize="1" maxsize="4">
++          <register name="D0"/>
++        </pentry>
++      </output>
++      <unaffected>
++        <register name="D1"/>
++        <register name="D2"/>
++        <register name="D3"/>
++        <register name="D4"/>
++        <register name="D5"/>
++        <register name="D6"/>
++        <register name="D7"/>
++        <register name="A1"/>
++        <register name="A2"/>
++        <register name="A3"/>
++        <register name="A4"/>
++        <register name="A5"/>
++        <register name="A6"/>
++        <register name="SP"/>
++      </unaffected>
++      <killedbycall>
++        <register name="D0"/>
++        <register name="A0"/>
++      </killedbycall>
++    </prototype>
++    <prototype name="mac_pascal" extrapop="unknown" stackshift="0">
++      <input>
++        <pentry minsize="1" maxsize="500" align="2">
++          <addr offset="0" space="stack"/>
++        </pentry>
++      </input>
++      <output>
++        <pentry minsize="1" maxsize="4">
++          <register name="D0"/>
++        </pentry>
++      </output>
++      <unaffected>
++        <register name="D3"/>
++        <register name="D4"/>
++        <register name="D5"/>
++        <register name="D6"/>
++        <register name="D7"/>
++        <register name="A2"/>
++        <register name="A3"/>
++        <register name="A4"/>
++        <register name="A5"/>
++        <register name="A6"/>
++        <register name="SP"/>
++      </unaffected>
++      <killedbycall>
++        <register name="D0"/>
++        <register name="D1"/>
++        <register name="D2"/>
++        <register name="A0"/>
++        <register name="A1"/>
++      </killedbycall>
++    </prototype>
+   
+ </compiler_spec>

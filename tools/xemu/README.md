@@ -42,7 +42,13 @@ Exemplo de `CASOS.json` com arquivos de teste:
 - `xcmdrun.py`: o XCmdBlock e os callbacks do HyperCard. Os números dos
   callbacks do 2.x (29 em diante) foram lidos nas rotinas de cola dos próprios
   externos do acervo de teste; os marcados com `?` aparecem em um só externo.
-- `compare.py`: o comparador.
+- `compare.py`: o comparador (`--dump` grava o código 68k de um externo
+  para o `tools/ghidra`).
+
+Para achar quem escreveu um endereço, `Machine.watch(início, fim)` registra
+cada escrita da CPU nessa faixa e `Machine.watch_log()` devolve PC, endereço,
+valor e tamanho de cada uma (as escritas dos traps, feitas em Python, não
+entram).
 
 Nada aqui desenha: traps de janela e de desenho não fazem nada, e o que
 falta para um externo rodar aparece como "not emulated: trap XXXX".
