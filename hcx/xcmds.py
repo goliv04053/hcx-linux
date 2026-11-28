@@ -2033,13 +2033,13 @@ class _FullHPop:
     def params(self):
         a = self.a
         self.loc = None
-        self.sel, self.font, self.size, self.mark, self.sub_owner = 0x7FFF, -1, -1, 0xFF, True
+        self.sel, self.font, self.size, self.mark, self.sub_owner = 0x7FFF, -1, -1, 0xFF, self.ver < 20
         for i in range(1, len(a)):
             raw = a[i].replace("\n", "\r").encode("mac_roman", "replace")[:255]
             if not raw:
                 raise _FullHPopError("Empty param #%d" % (i + 1))
-            if raw.lower() == b"fastest":
-                self.fastest = True
+            if raw.lower() == (b"smart" if self.ver >= 20 else b"fastest"):
+                self.fastest = self.ver < 20
                 continue
             pt = bytearray(raw + b"\0\0")
             x, k = _fhp_read(pt, 0, 0x2C)
@@ -2059,7 +2059,7 @@ class _FullHPop:
                 continue
             name, k = _fhp_read(pt, 0, 0x2C)
             fid = _get_fnum(name)
-            if fid == 0 and name.lower() != b"chicago":
+            if fid == 0 and (self.ver >= 20 or name.lower() != b"chicago"):
                 raise _FullHPopError("Incorrect param #%d" % (i + 1))
             self.font = fid
             size, k = _fhp_read(pt, k, 0x2C)
@@ -2071,7 +2071,8 @@ class _FullHPop:
     def run(self):
         a = self.a
         if len(a) == 1 and len(a[0]) == 1 and a[0] in "!?=":
-            return self.pstr_at({"!": b"FullHPop 1.", "?": b"FullHPop(<menu>", "=": b"<item name>"}[a[0]])
+            return self.pstr_at({"!": b"FullHPop %d." % (self.ver // 10 or 1), "?": b"FullHPop(<menu>",
+                                 "=": b"<item name>"}[a[0]])
         try:
             return self.run_menu()
         except _FullHPopError as e:
@@ -2168,6 +2169,139 @@ class _FullHPop:
         return out[:255].decode("mac_roman").replace("\r", "\n")
 
 
+class _FullHPop2(_FullHPop):
+    """FullHPop 2.0: items are left as they are unless "smart" is given
+    (no more "fastest"), a boolean lets an item with a submenu be chosen
+    (default false), a number as the menu is a MENU resource with its
+    submenus at any depth, and the answer is three lines: the names of the
+    item and its parents ("item,subitem"), their numbers, and the width of
+    the chosen one."""
+
+    def __init__(self, it, a, code):
+        super().__init__(it, a, code)
+        self.ver, self.fastest = 20, True
+        self.META, self.base = b"(!</^\xac,", 0xF8
+        self.order = []
+
+    def register(self, mid, menu):
+        if menu is None:
+            raise _FullHPopError("Could't create [sub]menu")
+        self.menus[mid] = menu
+        self.order.append(mid)
+        return menu
+
+    def submenu(self, main, n, buf, pos):
+        super().submenu(main, n, buf, pos)
+        self.order.append(self.next_id)
+
+    def resource_menu(self, mid):
+        data = _resource_data(self.it, "MENU", mid)
+        return self.register(mid, None if data is None else _MacMenu.from_resource(mid, data))
+
+    def resource_subs(self, m):
+        """Each item's submenu (key 0x1B, its ID in the mark), and theirs."""
+        for k in range(1, m.count() + 1):
+            e = m.item(k)
+            if e[2] == 0x1B:
+                if len(self.order) == 127:
+                    raise _FullHPopError("Cannot exceed 127 submenus")
+                self.resource_subs(self.resource_menu(e[3]))
+
+    def run_menu(self):
+        a = self.a
+        if not a or not a[0]:
+            raise _FullHPopError("Missing or empty parameter(s)")
+        self.params()
+        if self.font == -1:
+            tf = self.eval("textFont of the target")
+            self.font = _get_fnum(tf) if tf else 0
+        if self.size == -1:
+            ts = self.eval("textSize of the target")
+            self.size = _word(_fhp_num(ts)) if ts else 12
+        self.font0, self.size0 = self.font, self.size
+        if self.mark == 0xFF:
+            self.mark = 0x12 if self.font in (_get_fnum(b"Chicago"), _get_fnum(b"Charcoal")) else 0xC3
+        target = self.eval("the target")
+        h, v = self.loc if self.loc else (0, 0)
+        if not self.loc:
+            if b"field" in target or b"button" in target:
+                r = self.eval("item 1 to 2 of rect of the target").split(b",")
+                if len(r) >= 2 and _fhp_is_int(r[0]) and _fhp_is_int(r[1]):
+                    h, v = _fhp_num(r[0]), _fhp_num(r[1])
+            else:
+                try:
+                    mh, mv = (int(x) for x in str(self.it.host.mouse_loc()).split(","))
+                except Exception:  # noqa: BLE001
+                    mh, mv = 0, 0
+                h, v = mh - self.size // 2, mv - 10
+        self.target_text = b"@#&\xc0"
+        if self.sel == 0x7FFF:
+            if b"field" in target:
+                self.target_text = self.eval("item 1 of line 1 of target")
+            elif b"button" in target:
+                self.target_text = self.eval("short name of the target")
+        if self.target_text[:1] == b"-":
+            self.target_text = b"\xd0" + self.target_text[1:]
+        t = a[0].replace("\n", "\r").encode("mac_roman", "replace").split(b"\0")[0].rstrip(b"\r")
+        if _fhp_is_int(t[:255]):
+            mid = _word(_fhp_num(t[:255]))
+            main = self.resource_menu(mid)
+            self.resource_subs(main)
+        else:
+            main = self.register(128, _MacMenu(128))
+            if len(t) == 4:
+                main.insert_names(res_menu_names(t.decode("mac_roman"), _all_resources(self.it)))
+                if not main.count():
+                    raise _FullHPopError("No such resource")
+                if self.sel == 0x7FFF:
+                    for k in range(1, main.count() + 1):
+                        if self.text(main, k).lower() == self.target_text.lower():
+                            self.sel = k
+                            main.set(k, 3, self.mark)
+                            break
+            else:
+                self.build(main, t)
+        if self.sel == 0x7FFF:
+            self.sel = 0
+        if not self.it.host.mouse_is_down():
+            return None
+        m, n, enabled = main.select(self.it, self.menus, h, v)
+        if n <= 0 or not (enabled or self.sub_owner):
+            return None
+        if not (n > 31 or m.flags >> n & 1):
+            return None
+        return self.result(m, n)
+
+    def result(self, m, n):
+        names, nums = plain_item(self.text(m, n)), b"%d" % n
+        width = b"%d" % self.width(names)
+        mid = m.id
+        while mid != self.order[0]:
+            mid = self.parent(mid, names, nums)
+            names, nums = self.prefix
+        out = names + b"\r" + nums + b"\r" + width
+        return out[:255].decode("mac_roman").replace("\r", "\n")
+
+    def parent(self, child, names, nums):
+        """The menu with the item whose submenu is child (the last one so),
+        with that item before names and nums."""
+        self.prefix = names, nums
+        for mid in reversed(self.order):
+            m = self.menus[mid]
+            for k in range(m.count(), 0, -1):
+                e = m.item(k)
+                if e[2] == 0x1B and e[3] == child & 0xFF:
+                    self.prefix = ((plain_item(e[0]) + b"," + names)[:255], (b"%d," % k + nums)[:255])
+                    return mid
+        return self.order[0]
+
+
+def plain_item(x):
+    """A FullHPop 2.0 answer's name: a comma as [44], a leading en dash as "-"."""
+    x = x.replace(b",", b"[44]")[:255]
+    return b"-" + x[1:] if x[:1] == b"\xd0" else x
+
+
 def _h_pop_up_menu_counted(it, a):
     """The HPopupMenu(items, checkedItem, top, left) with no strings (6.2K,
     in HyprStat and TestIt!): items end at ",", ";" or return, and the
@@ -2259,14 +2393,20 @@ def _h_pop_up_menu_lines(it, a):
     return "%d,%d" % (m.id - 128, n)
 
 
-@xfcn("HPopUpMenu", "FullHPop")
-def h_pop_up_menu(it, a):
+@xfcn("FullHPop")
+def full_h_pop(it, a):
+    """FullHPop(menu [, loc] ...): the stack's own FullHPop first, then an HPopUpMenu."""
+    return h_pop_up_menu(it, a, ("FullHPop", "HPopUpMenu"))
+
+
+@xfcn("HPopUpMenu")
+def h_pop_up_menu(it, a, names=("HPopUpMenu", "FullHPop")):
     """HPopUpMenu(items, checkedItem, top, left) pops up a menu with the given
     items (lines, or one line of comma-separated items) with its top-left
     corner at left,top and returns "item text,,item number", or empty if
     nothing was chosen. A menu resource id as items isn't supported."""
     import zlib
-    for name in ("HPopUpMenu", "FullHPop"):
+    for name in names:
         code = _ext_code(it, name)
         if code:
             if b"Jon Pugh" in code:
@@ -2280,7 +2420,7 @@ def h_pop_up_menu(it, a):
             if zlib.crc32(code) in (0xCD6999AD, 0x0913BDB5):
                 return _h_pop_up_menu_counted(it, a)
             if b"FullHPop(<menu>" in code:
-                return _FullHPop(it, a, code).run()
+                return (_FullHPop2 if b"FullHPop 2." in code else _FullHPop)(it, a, code).run()
             break
     src = str(_arg(a, 0))
     if ht.is_number(src):

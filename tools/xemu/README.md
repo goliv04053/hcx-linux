@@ -70,7 +70,8 @@ Exemplo de `CASOS.json` com arquivos de teste:
 - `dialogs.py`: Dialog Manager (DLOG, ALRT, DITL, ModalDialog com as
   respostas do caso) e List Manager; `menus.py`: Menu Manager (NewMenu,
   AppendMenu com os metacaracteres, InsMenuItem, AddResMenu, submenus,
-  PopUpMenuSelect pelo menu do HCX). Janelas têm fila de eventos e o
+  PopUpMenuSelect pelo menu do HCX, MenuChoice com o item em que o
+  mouse foi solto, mesmo desabilitado). Janelas têm fila de eventos e o
   estado do botão do mouse.
 - `compare.py`: o comparador (`--dump` grava o código 68k de um externo
   para o `tools/ghidra`).
