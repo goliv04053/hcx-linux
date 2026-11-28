@@ -17,7 +17,7 @@ usa).
 `ARQUIVO` é qualquer coisa que o HCX abre (pilha, .sit, imagem de disco).
 Rode da raiz do repositório com o Python que tem GTK. Os arquivos que os
 externos leem e gravam ficam numa pasta temporária, nunca em
-`~/.local/share/hcx`. As globais que o externo muda também são comparadas.
+`~/.local/share/hcx`. As globais que o externo muda e a área de transferência também são comparadas.
 `XEMU_TRACE=1` mostra cada callback e, quando o código 68k falha, as últimas
 instruções que rodaram antes.
 
@@ -31,10 +31,16 @@ Exemplo de `CASOS.json` com arquivos de teste:
 
 - `cpu/`: Musashi 3.4 (Karl Stenerud, licença MIT) com o SoftFloat de John
   Hauser (licença própria, livre), mais `hcxcpu.c`, a ponte com o Python.
+  `hcxmoira.cpp` é a mesma ponte sobre o Moira (Dirk W. Hoffmann, licença
+  MIT, não incluído), uma segunda CPU para conferir a primeira quando um
+  externo faz algo estranho: clone <https://github.com/dirkwhoffmann/Moira>,
+  rode `sh tools/xemu/cpu/build-moira.sh PASTA_DO_MOIRA` e use
+  `HCX_CPU_LIB=tools/xemu/_hcxmoira.so` antes do comando.
 - `mac68k.py`: memória de 16 MB, heap com handles, pilha, globais de memória
   baixa e do QuickDraw.
 - `toolbox.py`: os traps da Toolbox (memória, recursos, strings, datas,
-  QuickDraw de retângulos, tela, International Utilities e Script Manager
+  QuickDraw de retângulos, tela, TextEdit sem desenho, Scrap Manager sobre
+  a área de transferência do HCX, International Utilities e Script Manager
   para o script romano) e `filemgr.py`, o File Manager sobre a pasta
   temporária.
 - `sane.py`: o SANE, ponto flutuante do Mac (Pack4 e as conversões decimais

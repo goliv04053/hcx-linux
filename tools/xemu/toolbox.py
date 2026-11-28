@@ -1723,7 +1723,7 @@ def _te_write(tb, hte, n, chars):
         runs.append((i, index[key]))
     if not runs:
         runs = [(0, 0)]
-        styles = [[1, (0, 0, 12, bytes(6), 16, 12)]]
+        styles = [[1, _te_first_style(tb, hte)]]
     heap.set_size(hs, 20 + 4 * (len(runs) + 1))
     sp = heap.deref(hs)
     m.w16(sp, len(runs))
@@ -1746,10 +1746,198 @@ def _te_write(tb, hte, n, chars):
         m.wbytes(e + 12, color)
 
 
+def _te_first_style(tb, hte):
+    """The style of an empty styled TE record: its first style entry."""
+    m, heap = tb.m, tb.heap
+    hs = _te_style(tb, hte)
+    if hs:
+        sp = heap.deref(hs)
+        if m.r16(sp + 2):
+            e = heap.deref(m.r32(sp + 4))
+            return (m.s16(e + 6), m.r8(e + 8), m.s16(e + 10), m.rbytes(e + 12, 6), m.s16(e + 2), m.s16(e + 4))
+    return (0, 0, 12, bytes(6), 16, 12)
+
+
+def new_te(tb, dest, view, styled=True):
+    """An empty TextEdit record with the current port's font, as TENew and
+    TEStyleNew make it (nothing is drawn)."""
+    m, heap = tb.m, tb.heap
+    port = m.r32(m.r32(m.a(5)))
+    font, face, size = (m.s16(port + 68), m.r8(port + 70), m.s16(port + 74)) if port else (0, 0, 12)
+    hte = heap.new_handle(104, clear=True)
+    htext = heap.new_handle(0)
+    t = heap.deref(hte)
+    for base, r in ((0, dest), (8, view)):
+        m.wbytes(t + base, r)
+    m.w16(t + 60, 0)                    # teLength
+    m.w32(t + 62, htext)
+    m.w32(t + 82, port)                 # inPort
+    m.w16(t + 78, 1)                    # txMode
+    if not styled:
+        m.w16(t + 24, size + max(2, size // 4) + 1)
+        m.w16(t + 26, size)
+        m.w16(t + 74, font)
+        m.w8(t + 76, face)
+        m.w16(t + 80, size)
+        return hte
+    table = heap.new_handle(18, clear=True)
+    e = heap.deref(table)
+    m.w16(e, 0)
+    m.w16(e + 2, size + max(2, size // 4) + 1)
+    m.w16(e + 4, size)
+    m.w16(e + 6, font)
+    m.w8(e + 8, face)
+    m.w16(e + 10, size)
+    hst = heap.new_handle(28, clear=True)
+    sp = heap.deref(hst)
+    m.w16(sp, 1)                        # nRuns
+    m.w16(sp + 2, 1)                    # nStyles
+    m.w32(sp + 4, table)
+    m.w32(sp + 8, heap.new_handle(4, clear=True))   # lhTab
+    m.w32(sp + 16, heap.new_handle(8, clear=True))  # nullStyle
+    m.w16(sp + 20, 0)
+    m.w16(sp + 22, 0)
+    m.w16(sp + 24, 1)                   # the run after the end
+    m.w16(sp + 26, 0)
+    t = heap.deref(hte)
+    m.w16(t + 24, 0xFFFF)               # lineHeight, fontAscent -1: styled
+    m.w16(t + 26, 0xFFFF)
+    m.w32(t + 74, hst)
+    m.w16(t + 80, 0xFFFF)               # txSize -1: styled
+    return hte
+
+
+@tb_trap(0xA83E, 0xA9D2)
+def _te_new(tb, op):
+    """TEStyleNew / TENew(destRect, viewRect): TEHandle."""
+    m = tb.m
+    view, dest = m.pop32(), m.pop32()
+    tb.ret32(new_te(tb, m.rbytes(dest, 8), m.rbytes(view, 8), op == 0xA83E))
+
+
+def _te_replace(tb, hte, start, end, data, styles=None):
+    """Puts data in place of [start, end) of a TE record, the new
+    characters taking `styles` (one per character) or the style of the
+    character before; the selection ends after the new text."""
+    m, heap = tb.m, tb.heap
+    t = heap.deref(hte)
+    n, chars = _te_read(tb, hte)
+    start, end = max(0, min(start, n)), max(0, min(end, n))
+    h = m.r32(t + 62)
+    old = m.rbytes(heap.deref(h), n)
+    if styles is None:
+        st = chars[start - 1] if start > 0 else (chars[end] if end < n else _te_first_style(tb, hte))
+        styles = [st] * len(data)
+    text = old[:start] + bytes(data) + old[end:]
+    chars = chars[:start] + list(styles) + chars[end:]
+    heap.set_size(h, len(text))
+    m.wbytes(heap.deref(h), text)
+    t = heap.deref(hte)
+    m.w16(t + 60, len(text))
+    m.w16(t + 32, start + len(data))
+    m.w16(t + 34, start + len(data))
+    _te_write(tb, hte, len(text), chars)
+
+
+@tb_trap(0xA9DE)
+def _te_insert(tb, op):
+    """TEInsert(text, length, hTE): before the selection, which stays."""
+    m = tb.m
+    hte, n, p = m.pop32(), m.pop32(), m.pop32()
+    t = tb.heap.deref(hte)
+    s0, s1 = m.r16(t + 32), m.r16(t + 34)
+    _te_replace(tb, hte, s0, s0, m.rbytes(p, n))
+    t = tb.heap.deref(hte)
+    m.w16(t + 32, s0 + n)
+    m.w16(t + 34, s1 + n)
+
+
+@tb_trap(0xA9D7)
+def _te_delete(tb, op):
+    hte = tb.m.pop32()
+    t = tb.heap.deref(hte)
+    _te_replace(tb, hte, tb.m.r16(t + 32), tb.m.r16(t + 34), b"")
+
+
+def _styl_of(chars):
+    """A 'styl' scrap (StScrpRec) for per-character styles."""
+    runs, prev = [], None
+    for i, st in enumerate(chars):
+        if st[:4] != prev:
+            prev = st[:4]
+            runs.append((i, st))
+    out = struct.pack(">H", len(runs))
+    for i, (font, face, size, color, height, ascent) in runs:
+        out += struct.pack(">lhhhBBh", i, height or size + max(2, size // 4) + 1, ascent or size,
+                           font, face, 0, size) + bytes(color)
+    return out
+
+
+def _styl_chars(styl, n, default):
+    """Per-character styles from a 'styl' scrap."""
+    out = [default] * n
+    if len(styl) < 2:
+        return out
+    k = struct.unpack(">H", styl[:2])[0]
+    ent = []
+    for i in range(k):
+        e = styl[2 + 20 * i:22 + 20 * i]
+        if len(e) < 20:
+            break
+        start, height, ascent, font, face, _f, size = struct.unpack(">lhhhBBh", e[:14])
+        ent.append((start, (font, face, size, e[14:20], height, ascent)))
+    for j, (start, st) in enumerate(ent):
+        end = ent[j + 1][0] if j + 1 < len(ent) else n
+        for c in range(max(0, start), min(end, n)):
+            out[c] = st
+    return out
+
+
+@tb_trap(0xA9D5, 0xA9D6)
+def _te_copy(tb, op):
+    """TECopy / TECut: a styled record's selection goes to the desk scrap
+    too (TEXT and styl), as in Inside Macintosh V."""
+    m = tb.m
+    hte = m.pop32()
+    t = tb.heap.deref(hte)
+    s0, s1 = m.r16(t + 32), m.r16(t + 34)
+    n, chars = _te_read(tb, hte)
+    data = m.rbytes(tb.heap.deref(m.r32(t + 62)), n)[s0:s1]
+    if _te_style(tb, hte):
+        tb.scrap_put("TEXT", data, replace=True)
+        tb.scrap_put("styl", _styl_of(chars[s0:s1]), replace=True)
+    else:
+        tb.te_scrap = data
+    if op == 0xA9D6:
+        _te_replace(tb, hte, s0, s1, b"")
+
+
+@tb_trap(0xA9DB)
+def _te_paste(tb, op):
+    m = tb.m
+    hte = m.pop32()
+    t = tb.heap.deref(hte)
+    data = tb.scrap().get("TEXT", b"") if _te_style(tb, hte) else getattr(tb, "te_scrap", b"")
+    _te_replace(tb, hte, m.r16(t + 32), m.r16(t + 34), data)
+
+
 @tb_trap(0xA83D)
 def _te_dispatch(tb, op):
     m = tb.m
     sel = m.pop16()
+    if sel == 0:                # TEStylePaste(hTE): the desk scrap's text and styles
+        hte = m.pop32()
+        t = tb.heap.deref(hte)
+        s0, s1 = m.r16(t + 32), m.r16(t + 34)
+        sc = tb.scrap()
+        data = sc.get("TEXT", b"")
+        styles = None
+        if "styl" in sc and _te_style(tb, hte):
+            n, chars = _te_read(tb, hte)
+            st = chars[s0 - 1] if s0 > 0 else _te_first_style(tb, hte)
+            styles = _styl_chars(sc["styl"], len(data), st)
+        _te_replace(tb, hte, s0, s1, data, styles)
+        return
     if sel == 1:                # TESetStyle(mode, newStyle, redraw, hTE)
         hte = m.pop32()
         m.pop16()
@@ -1808,6 +1996,93 @@ def _te_dispatch(tb, op):
         tb.ret32(n)
     else:
         raise Unimplemented("TEDispatch selector %d" % sel)
+
+
+# -- Scrap Manager: the desk scrap is HCX's clipboard (its text) ------------------------------
+
+def _scrap(tb):
+    if getattr(tb, "_scrap", None) is None:
+        from .xcmdrun import to_mac
+        text = tb.it.host.clipboard_text() if tb.it is not None else ""
+        tb._scrap = [("TEXT", to_mac(text))] if text else []
+    return dict(tb._scrap)
+
+
+def _scrap_put(tb, kind, data, replace=False):
+    from .xcmdrun import from_mac
+    tb.scrap()
+    if replace:
+        tb._scrap = [(k, d) for k, d in tb._scrap if k != kind]
+    tb._scrap.append((kind, bytes(data)))
+    if kind == "TEXT" and tb.it is not None:
+        tb.it.host.set_clipboard(from_mac(dict(tb._scrap)["TEXT"]))
+
+
+Toolbox.scrap = _scrap
+Toolbox.scrap_put = _scrap_put
+
+
+def _scrap_globals(tb):
+    m = tb.m
+    sc = tb._scrap
+    m.w32(0x960, sum(8 + len(d) + (len(d) & 1) for _k, d in sc))      # ScrapSize
+    m.w16(0x96A, 1)                                                     # ScrapState: in memory
+
+
+@tb_trap(0xA9FC)
+def _zero_scrap(tb, op):
+    m = tb.m
+    tb.scrap()
+    tb._scrap = []
+    if tb.it is not None:
+        tb.it.host.set_clipboard("")
+    m.w16(0x968, (m.r16(0x968) + 1) & 0xFFFF)                           # ScrapCount
+    _scrap_globals(tb)
+    tb.ret32(0)
+
+
+@tb_trap(0xA9FA, 0xA9FB)
+def _unload_scrap(tb, op):
+    """UnloadScrap / LoadScrap: the scrap stays in memory."""
+    tb.scrap()
+    _scrap_globals(tb)
+    tb.ret32(0)
+
+
+@tb_trap(0xA9F9)
+def _info_scrap(tb, op):
+    tb.scrap()
+    _scrap_globals(tb)
+    tb.ret32(0x960)
+
+
+@tb_trap(0xA9FE)
+def _put_scrap(tb, op):
+    """PutScrap(length, theType, source): LONGINT"""
+    m = tb.m
+    p, kind, n = m.pop32(), m.pop32(), m.pop32()
+    tb.scrap_put(kind.to_bytes(4, "big").decode("latin-1"), m.rbytes(p, n))
+    _scrap_globals(tb)
+    tb.ret32(0)
+
+
+@tb_trap(0xA9FD)
+def _get_scrap(tb, op):
+    """GetScrap(hDest, theType, VAR offset): LONGINT, the length or noTypeErr"""
+    m = tb.m
+    poff, kind, h = m.pop32(), m.pop32(), m.pop32()
+    key = kind.to_bytes(4, "big").decode("latin-1")
+    off = 0
+    for k, d in tb._scrap if tb.scrap() is not None else []:
+        if k == key:
+            if h:
+                tb.heap.set_size(h, len(d))
+                m.wbytes(tb.heap.deref(h), d)
+            m.w32(poff, off + 8)
+            tb.ret32(len(d))
+            return
+        off += 8 + len(d) + (len(d) & 1)
+    tb.ret32(-102 & 0xFFFFFFFF)                                         # noTypeErr
 
 
 @tb_trap(0xA9D1)

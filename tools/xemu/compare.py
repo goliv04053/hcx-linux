@@ -187,24 +187,26 @@ def sandbox(files):
     return snapshot
 
 
-def compare(h, name, kind, code, params, files=None, replies=None):
-    """Runs the original and the native with the same params, files and
-    dialog replies, and prints whether result, files, globals and the
-    dialogs shown are the same."""
+def compare(h, name, kind, code, params, files=None, replies=None, clip=""):
+    """Runs the original and the native with the same params, files,
+    dialog replies and clipboard, and prints whether result, files,
+    globals, clipboard and the dialogs shown are the same."""
     it = h.interp
     h.lines.clear()
     globs = dict(it.globals)
     snap = sandbox(files or {})
     h.replies, h.dialogs = list(replies or []), []
+    h.set_clipboard(clip)
     emu = xcmdrun.emulate(it, name, kind, params, code)
     emu_files = snap()
     emu_globs = dict(it.globals)
-    emu_log, emu_dialogs = list(h.lines), h.dialogs
+    emu_log, emu_dialogs, emu_clip = list(h.lines), h.dialogs, h.clipboard_text()
     h.lines.clear()
     h.replies, h.dialogs = list(replies or []), []
     it.globals.clear()
     it.globals.update(globs)
     snap = sandbox(files or {})
+    h.set_clipboard(clip)
     xcmds._EXT_OVERRIDE[name.lower()] = code
     try:
         nat = native(it, name, kind, params)
@@ -212,12 +214,12 @@ def compare(h, name, kind, code, params, files=None, replies=None):
         xcmds._EXT_OVERRIDE.clear()
     nat_files = snap()
     nat_globs = dict(it.globals)
-    nat_dialogs = h.dialogs
+    nat_dialogs, nat_clip = h.dialogs, h.clipboard_text()
     it.globals.clear()
     it.globals.update(globs)
     same = emu.get("error") is None and nat.get("error") is None and \
         (emu.get("result") or "") == (nat.get("result") or "") and emu_files == nat_files and \
-        emu_globs == nat_globs and emu_dialogs == nat_dialogs
+        emu_globs == nat_globs and emu_dialogs == nat_dialogs and emu_clip == nat_clip
     print("%s %s %s%s" % ("=" if same else "≠", name, json.dumps(params, ensure_ascii=False),
                           "  replies " + json.dumps(replies, ensure_ascii=False) if replies else ""))
     print("   original: %s%s" % (_show(emu.get("result")), "   [%s]" % emu["error"] if emu.get("error") else ""))
@@ -233,6 +235,8 @@ def compare(h, name, kind, code, params, files=None, replies=None):
     for k in sorted(set(emu_globs) | set(nat_globs)):
         if emu_globs.get(k) != nat_globs.get(k):
             print("   global %s: original %s, native %s" % (k, _show(emu_globs.get(k)), _show(nat_globs.get(k))))
+    if emu_clip != nat_clip:
+        print("   clipboard: original %s, native %s" % (_show(emu_clip), _show(nat_clip)))
     for d in emu_dialogs:
         print("   dialog: %s" % json.dumps(d, ensure_ascii=False))
     if emu_dialogs != nat_dialogs:

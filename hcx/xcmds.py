@@ -2413,8 +2413,15 @@ def selection_to_clip(it, a):
 
 @xcmd("AppendToClip")
 def append_to_clip(it, a):
-    text = str(a[0]) if a else it.host.selection_text()
-    it.host.set_clipboard(it.host.clipboard_text() + text)
+    """AppendToClip text, font, size, styles (Gibson's Library): adds the
+    text, in that font, size and comma-separated styles, to the end of the
+    clipboard. Exactly four parameters, or "the result" says so. HCX's
+    clipboard keeps only the text. Checked against the original in
+    tools/xemu."""
+    if len(a) != 4:
+        it.result = "Incorrect number of parameters"
+        return
+    it.host.set_clipboard(it.host.clipboard_text() + str(a[0]))
 
 
 # -- fields and styles -----------------------------------------------------------------------
