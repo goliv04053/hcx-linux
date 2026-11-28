@@ -21,7 +21,20 @@ externos leem e gravam ficam numa pasta temporária, nunca em
 transferência e os diálogos que ele mostra também são comparados. Os
 diálogos de arquivo (Standard File) são cancelados, a não ser que o caso
 traga respostas: no `compare()` de Python, `replies=["HD:Notas:a.txt"]`
-escolhe esse arquivo.
+escolhe esse arquivo. As outras respostas, na ordem em que o externo pede:
+
+- para `answer`, o botão; para `ask`, a resposta (`null` cancela);
+- `{"button": "Cancel"}` ou `{"item": 2}` fecha um diálogo de recurso
+  (DLOG/ALRT com DITL, pelo Dialog Manager); `"list": [2, 3]` escolhe
+  linhas da primeira lista (List Manager) e `"edit": [...]` e
+  `"check": [...]` preenchem os campos e as caixas em ordem;
+- `{"pick": [linha, subitem]}` escolhe num menu (PopUpMenuSelect, Menu
+  Manager); subitem 0 é a própria linha, e `{"pick": null}` cancela. O
+  submenu de um submenu aparece achatado, "filho › neto", no submenu da
+  linha.
+
+`mouse` (`"mouse": true` no caso) deixa o botão do mouse apertado até o
+primeiro menu ou diálogo, como num externo chamado de um `mouseDown`.
 `XEMU_TRACE=1` mostra cada callback e, quando o código 68k falha, as últimas
 instruções que rodaram antes.
 
@@ -29,7 +42,9 @@ Exemplo de `CASOS.json` com arquivos de teste:
 
     {"files": {"HD:Notas:a.txt": "olá", "HD:Vazia:": null},
      "cases": [["GetFilesInDir", ["HD:Notas:", "TEXT", "\n"]],
-               ["AppendDataToFile", ["mais", "4", "HD:Notas:a.txt"]]]}
+               ["AppendDataToFile", ["mais", "4", "HD:Notas:a.txt"]],
+               ["HPopUpMenu", ["a,b1,b2\nc", "0", "100", "50"],
+                {"mouse": true, "replies": [{"pick": [1, 2]}]}]]}
 
 ## Partes
 
@@ -52,6 +67,11 @@ Exemplo de `CASOS.json` com arquivos de teste:
 - `xcmdrun.py`: o XCmdBlock e os callbacks do HyperCard. Os números dos
   callbacks do 2.x (29 em diante) foram lidos nas rotinas de cola dos próprios
   externos do acervo de teste; os marcados com `?` aparecem em um só externo.
+- `dialogs.py`: Dialog Manager (DLOG, ALRT, DITL, ModalDialog com as
+  respostas do caso) e List Manager; `menus.py`: Menu Manager (NewMenu,
+  AppendMenu com os metacaracteres, InsMenuItem, AddResMenu, submenus,
+  PopUpMenuSelect pelo menu do HCX). Janelas têm fila de eventos e o
+  estado do botão do mouse.
 - `compare.py`: o comparador (`--dump` grava o código 68k de um externo
   para o `tools/ghidra`).
 

@@ -1269,7 +1269,8 @@ class _MacMenu:
 
     def select(self, it, menus, h, v):
         """PopUpMenuSelect: (menu, item) chosen (item 0: none), and whether
-        it can be chosen (a disabled one answers 0 but is in MenuDisable)."""
+        it can be chosen (a disabled one, or one with a submenu, answers 0
+        but is in MenuDisable)."""
         items, rows = self.host_items(menus)
         r = it.host.popup_menu(items, h, v)
         if not r or not 1 <= r[0] <= len(items):
@@ -1278,7 +1279,7 @@ class _MacMenu:
         if sub and 1 <= sub <= len(rows[line - 1]):
             m, n = rows[line - 1][sub - 1]
             return m, n, m.enabled(n)
-        return self, line, self.enabled(line)
+        return self, line, self.enabled(line) and not rows[line - 1]
 
 
 def _resource_data(it, rtype, rid):
@@ -1675,17 +1676,611 @@ def _h_pop_up_menu_pugh(it, a, code):
     return out.split(b"\0")[0].decode("mac_roman").replace("\r", "\n")
 
 
+def _string_to_num(raw):
+    """The Mac's StringToNum: a sign, then every character taken as a digit."""
+    neg = raw[:1] == b"-"
+    if raw[:1] in (b"-", b"+"):
+        raw = raw[1:]
+    n = 0
+    for c in raw:
+        n = (n * 10 + c - 48) & 0xFFFFFFFF
+    n = n - (1 << 32) if n >= 1 << 31 else n
+    return -n if neg else n
+
+
+_HPOPUP_EARLY = {0xC7091989: (False, "none", False), 0xD1FFAEFC: (True, "skip", True),
+                 0x6D1632BB: (False, "nonempty", False), 0x84FF1619: (False, "skip", True)}
+
+
+def _h_pop_up_menu_choices(it, a, code, early=False):
+    """The older HPopupMenu(choices, item, top, left [, font, size]): lines
+    (or the items of one line) are the menu; the items after the first
+    comma of a line are its submenu. The items go to AppendMenu as they
+    are (its metacharacters work). Answers "text,subtext,item,subitem"
+    (subitem 0 for a main item), or empty. The early ones ("Insufficient
+    Parameters") split only at ";" (return separates items inside
+    AppendMenu) and have no small icons."""
+    k = code.find(b"Usage: HPopupMenu" if not early else b"Insufficient Parameters")
+    usage = code[k:k + code[k - 1]].decode("mac_roman") if k > 0 else ""
+    import zlib
+    # the early ones: (return -> ";", "skip" a leading delimiter or "nonempty" items only, empty text answers empty)
+    cr, lead, empty = _HPOPUP_EARLY.get(zlib.crc32(code), (False, "none", False)) if early else \
+        (True, "skip", True)
+    a = [str(x) for x in a]
+    if len(a) < 4 or len(a) > 6 and b"[,font, size]" in code:
+        return usage
+    if not it.host.mouse_is_down() or a[0] == "" and empty:
+        return ""
+    t = bytearray(a[0].encode("mac_roman", "replace").replace(b"\n", b"\r"))
+    if cr:
+        t = t.replace(b"\r", b";")
+    if b";" not in t:
+        t = t.replace(b",", b";")
+    if not t or t[-1] != 0x3B:
+        t.append(0x3B)
+    dset = b",;"
+    start = 1 if lead == "skip" and t[0] in dset else 0
+    item = _param_num(a[1])
+    v, h = _param_num(a[2]), _param_num(a[3])
+
+    def add(raw, m):
+        k = raw.find(b"\xa0") if not early else -1    # "name†n": small icon n
+        icon = 0
+        if k >= 0:
+            rest, raw = raw[k + 1:], raw[:k]
+            icon = _string_to_num(rest) & 0xFFFF
+            icon = icon - 0x10000 if icon >= 0x8000 else icon
+            if len(rest) >= 2 and rest[-2] == 0x2F:
+                raw += rest[-2:]
+        m.insert(bytes(raw))
+        if icon > 0:
+            m.set(m.count(), 2, 0x1E)
+            m.set(m.count(), 1, icon)
+
+    main = _MacMenu(128)
+    menus = {0: main}
+    first, seg = True, start
+    for i in range(start, len(t)):
+        c = t[i]
+        if first and c in dset and (lead != "nonempty" or i != seg):
+            name = t[seg:i][:255]
+            if c == 0x2C:
+                first = False
+                if not (i + 1 < len(t) and t[i + 1] in dset):
+                    name = (name + b"/\x1b")[:255]
+            add(name, main)
+        if c == 0x3B:
+            seg, first = i + 1, True
+    if item > 0:
+        main.set(item, 3, 0x12)
+    inserted = {128: main}
+    line, first, have, seg = 0, True, False, 0
+    for i in range(start, len(t)):
+        c = t[i]
+        if c not in dset:
+            continue
+        if first:
+            line += 1
+            menus[line] = None
+            if c == 0x2C:
+                main.set(line, 3, line + 128)
+                menus[line] = _MacMenu(line + 128)
+                have = False
+        else:
+            if i != seg and menus.get(line):
+                add(t[seg:i][:255], menus[line])
+                have = True
+            if c == 0x3B and menus.get(line):
+                if not have:
+                    main.set(line, 3, 0)
+                    menus[line] = None
+                else:
+                    inserted[line + 128] = menus[line]
+        seg, first = i + 1, c == 0x3B
+    if not it.host.mouse_is_down():
+        return ""
+    m, n, enabled = main.select(it, inserted, h, v)
+    if n == 0:
+        return ""
+    if m is main:
+        top, sub, t1, t2 = n, 0, main.item(n)[0], b""
+    else:
+        top, sub = m.id - 128, n
+        t1 = main.item(top)[0] if main.item(top) else b""
+        t2 = m.item(n)[0]
+    if not ((n > 31 and not early) or m.flags & (1 << (n & 31))) or not t1:
+        return ""
+    out = b"".join([t1, b",", t2, b",", str(top).encode(), b",", str(sub).encode()])[:255]
+    return out.split(b"\0")[0].decode("mac_roman").replace("\r", "\n")
+
+
+class _FullHPopError(Exception):
+    pass
+
+
+def _fhp_num(raw):
+    """HyperCard's StrToNum/StrToLong callbacks: 0 for what isn't a number."""
+    t = raw.decode("mac_roman", "replace").strip()
+    n = int(ht.to_num(t)) if t and ht.is_number(t) else 0
+    return n
+
+
+def _word(n):
+    n &= 0xFFFF
+    return n - 0x10000 if n >= 0x8000 else n
+
+
+def _fhp_is_int(raw):
+    """Rinaldi's integer test: all but the last char among "+-0..9", the
+    last a digit."""
+    if not raw:
+        return False
+    i = 0
+    while i < len(raw) - 1 and raw[i] in b"+-0123456789":
+        i += 1
+    return raw[i] in b"0123456789"
+
+
+def _fhp_read(buf, pos, sep):
+    """Reads up to sep or the end (a longer piece is cut at 254 chars and
+    "…"), past the sep."""
+    start = pos
+    while buf[pos] and buf[pos] != sep:
+        pos += 1
+    tok = bytes(buf[start:pos])
+    if len(tok) > 255:
+        tok = tok[:254] + b"\xc9"
+    if buf[pos]:
+        pos += 1
+    return tok, pos
+
+
+def _fhp_token(buf, pos, sep):
+    """A piece up to sep, where a backslash before sep makes it part of the piece."""
+    acc = b""
+    while True:
+        tok, pos = _fhp_read(buf, pos, sep)
+        if not tok or tok[-1] != 0x5C:
+            break
+        acc = (acc + tok[:-1] + bytes([sep]))[:255]
+    return (acc + tok)[:255], pos
+
+
+def _get_fnum(raw):
+    from .render import MAC_FONT_IDS
+    name = raw.decode("mac_roman", "replace").lower()
+    num = 0
+    for fid, n in MAC_FONT_IDS.items():
+        if n.lower() == name:
+            num = fid
+    return num
+
+
+def _same_text(a, b):
+    """IUMagIDString: equal but for case."""
+    return a.decode("mac_roman", "replace").upper() == b.decode("mac_roman", "replace").upper()
+
+
+class _FullHPop:
+    """Frédéric Rinaldi's FullHPop(menu [, loc] [, selected item] [, font[,
+    size]] [, checkMark] [, sub owner select] [, "fastest"]): the
+    parameters after the menu are told apart by what they look like. Lines
+    (or the items of ";" or of "," when there is no return or ";") are the
+    menu, and a line's items after a comma its submenu; a backslash makes
+    the metacharacter after it plain. Items are capitalized, "^n" and "¨n" take real
+    ICON and SICN ids. A four-char menu is the names of the resources of
+    that type. Answers "item,subitem,item number,subitem number" and a
+    line with their widths in the menu's font. 1.3 has no backslash before
+    a separator, no "-" line and capitalizes after ";" too; 1.3 and 1.5
+    escape "-" as well, and answer a comma as it is (1.3) or as "’" (1.5)."""
+
+    def __init__(self, it, a, code):
+        self.it, self.a, self.code = it, [str(x) for x in a], code
+        k = code.find(b"FullHPop 1.")
+        self.ver = code[k + 11] - 0x30 if k >= 0 else 7
+        self.META = {3: b"(!</^\xac-", 5: b"(!</^\xac,-"}.get(self.ver, b"(!</^\xac,")
+        self.base = 0xFF - len(self.META)
+        self.fastest = False
+        self.sicn = False
+        self.check_ok = True
+        self.next_id = 128
+        self.menus = {}
+
+    def pstr_at(self, marker):
+        k = self.code.find(marker)
+        return self.code[k:k + self.code[k - 1]].decode("mac_roman") if k > 0 else ""
+
+    def eval(self, expr):
+        try:
+            v = self.it.eval_toks(ht.tokenize(expr))
+        except ht.HTError:
+            return b""
+        return str(v).replace("\n", "\r").encode("mac_roman", "replace").split(b"\0")[0][:255]
+
+    def width(self, raw):
+        from .render import MAC_FONT_IDS
+        font, size = MAC_FONT_IDS.get(self.font0, "Geneva"), self.size0 or 12
+        text = raw.decode("mac_roman", "replace")
+        try:
+            return int(self.it.host.text_width(text, font, size))
+        except Exception:  # noqa: BLE001
+            return int(len(text) * size * 0.55)
+
+    # -- items ---------------------------------------------------------------------------------------
+    def icons(self, text):
+        t = bytearray(text)
+        self.sicn = False
+        p = t.find(b"^")
+        if p < 0:
+            p = t.find(b"\xac")
+            self.sicn = p >= 0
+        if p < 0:
+            return bytes(t)
+        q = p + 1
+        while q < len(t) and q < p + 4 and t[q] in b"0123456789":
+            q += 1
+        n = _word(_fhp_num(bytes(t[p + 1:q])))
+        del t[p + 1:q]
+        if n < 257 or n > 511:
+            raise _FullHPopError("Bad ICON or SICN ID (257 ≤ x ≤ 511)")
+        t[p + 1:p + 1] = bytes([(n - 0xD0) & 0xFF])
+        if self.sicn:
+            t[p] = 0x5E
+        return bytes(t[:255])
+
+    def cap_point(self, t, i):
+        d7 = t[i] not in (b"!(-/<^\xac" if self.ver == 3 else b"!(,-/<^\xac")
+        if i == 0:
+            return d7
+        d5 = t[i - 1] in b"!/<^\xac"
+        if i == 1:
+            return d7 and not d5
+        return d7 and (not d5 or (t[i - 1] in b"/<" and t[i - 2] in b"^\xac"))
+
+    def capitalize(self, text):
+        t = bytearray(self.icons(text))
+        done = False
+        for i in range(len(t)):
+            if not done and self.cap_point(t, i):
+                done = True
+                if 0x61 <= t[i] <= 0x7A:
+                    t[i] -= 32
+            if 0x61 <= t[i] <= 0x7A and i > 0 and t[i - 1] in b"/<" and (i == 1 or t[i - 2] != 0x5E):
+                t[i] -= 32
+        return bytes(t) if done else (bytes(t) + b" ")[:255]
+
+    def add(self, m, n, text):
+        esc = b"\\" in text
+        t = bytearray(text)
+        while esc:
+            p = t.find(b"\\")
+            if not (0 <= p < len(t) - 1 and t[p + 1] in self.META):
+                break
+            t[p:p + 2] = bytes([self.base + self.META.index(t[p + 1]) + 1])
+        m.insert(bytes(t) if self.fastest else self.capitalize(bytes(t)))
+        if esc and m.item(n):
+            m.set(n, 0, bytes(self.unescape(c) for c in m.item(n)[0]))
+
+    def unescape(self, c):
+        if c <= self.base:
+            return c
+        return 0xD0 if c == 0xFF and self.META.endswith(b"-") else self.META[c - self.base - 1]
+
+    def token(self, buf, pos, sep):
+        return _fhp_read(buf, pos, sep) if self.ver == 3 else _fhp_token(buf, pos, sep)
+
+    def text(self, m, n):
+        e = m.item(n)
+        return e[0] if e else b""
+
+    def submenu(self, main, n, buf, pos):
+        if self.next_id + 1 > 255:
+            raise _FullHPopError("Cannot exceed 127 submenus")
+        self.next_id += 1
+        sub = self.menus[self.next_id] = _MacMenu(self.next_id)
+        k = 0
+        while True:
+            tok, pos = self.token(buf, pos, 0x2C)
+            if not tok:
+                break
+            k += 1
+            if self.ver >= 6 and tok == b"-":
+                self.add(sub, k, b"(-")
+                continue
+            if self.ver >= 6 and tok[:1] == b"-":
+                tok = b"\xd0" + tok[1:]
+            self.add(sub, k, tok)
+            if self.sel == 0x7FFF and _same_text(tok if self.ver == 3 else self.text(sub, k), self.target_text):
+                self.check_ok = False
+                self.sel = n
+                sub.set(k, 3, self.mark)
+            if not self.fastest and self.sicn:
+                sub.set(sub.count(), 2, 0x1E)
+        main.set(n, 2, 0x1B)
+        main.set(n, 3, sub.id)
+
+    def build(self, main, t):
+        sep = 0x0D if b"\r" in t else 0x3B if b";" in t else 0x2C
+        buf = bytearray(t + b"\0")
+        pos, n = 0, 0
+        while True:
+            n += 1
+            start = pos
+            line, pos = self.token(buf, pos, sep)
+            if not line:
+                break
+            if buf[pos]:
+                buf[pos - 1] = 0
+            item, start = self.token(buf, start, 0x2C)
+            if self.ver >= 5 and item == b"-":
+                main.insert(b"(-")
+                continue
+            if self.ver >= 6 and item[:1] == b"-":
+                item = b"\xd0" + item[1:]
+            self.add(main, n, item)
+            if self.sel == 0x7FFF and _same_text(item if self.ver == 3 else self.text(main, n), self.target_text):
+                self.sel = n
+            if self.ver == 3 and b"," in line or self.ver > 3 and any(
+                    c == 0x2C and (k == 0 or line[k - 1] != 0x5C) for k, c in enumerate(line)):
+                self.submenu(main, n, buf, start)
+                continue
+            if not self.fastest and self.sicn:
+                main.set(n, 2, 0x1E)
+            if self.check_ok and self.sel == n:
+                main.set(n, 3, self.mark)
+
+    # -- the call ------------------------------------------------------------------------------------
+    def params(self):
+        a = self.a
+        self.loc = None
+        self.sel, self.font, self.size, self.mark, self.sub_owner = 0x7FFF, -1, -1, 0xFF, True
+        for i in range(1, len(a)):
+            raw = a[i].replace("\n", "\r").encode("mac_roman", "replace")[:255]
+            if not raw:
+                raise _FullHPopError("Empty param #%d" % (i + 1))
+            if raw.lower() == b"fastest":
+                self.fastest = True
+                continue
+            pt = bytearray(raw + b"\0\0")
+            x, k = _fhp_read(pt, 0, 0x2C)
+            y, k = _fhp_read(pt, k, 0x2C)
+            if x and y and _fhp_is_int(x) and _fhp_is_int(y):
+                self.loc = (_word(_fhp_num(x)), _word(_fhp_num(y)))
+                continue
+            b = raw.decode("mac_roman", "replace").strip().lower()
+            if b in ("true", "false"):
+                self.sub_owner = b == "true"
+                continue
+            if _fhp_is_int(raw):
+                self.sel = _word(_fhp_num(raw))
+                continue
+            if len(raw) == 1:
+                self.mark = raw[0]
+                continue
+            name, k = _fhp_read(pt, 0, 0x2C)
+            fid = _get_fnum(name)
+            if fid == 0 and name.lower() != b"chicago":
+                raise _FullHPopError("Incorrect param #%d" % (i + 1))
+            self.font = fid
+            size, k = _fhp_read(pt, k, 0x2C)
+            if size:
+                if not (_fhp_is_int(size) and _fhp_num(size) > 0):
+                    raise _FullHPopError("Bad font size")
+                self.size = _word(_fhp_num(size))
+
+    def run(self):
+        a = self.a
+        if len(a) == 1 and len(a[0]) == 1 and a[0] in "!?=":
+            return self.pstr_at({"!": b"FullHPop 1.", "?": b"FullHPop(<menu>", "=": b"<item name>"}[a[0]])
+        try:
+            return self.run_menu()
+        except _FullHPopError as e:
+            return "Error : " + str(e)
+
+    def run_menu(self):
+        a = self.a
+        if not a or not a[0]:
+            raise _FullHPopError("Missing or empty parameter(s)")
+        self.params()
+        tf = self.eval("textFont of the target")
+        self.font0 = _get_fnum(tf) if tf else (0 if self.font == -1 else self.font)
+        if self.font == -1:
+            self.font = self.font0
+        ts = self.eval("textSize of the target")
+        self.size0 = _word(_fhp_num(ts)) if ts else (12 if self.size == -1 else self.size)
+        if self.size == -1:
+            self.size = self.size0
+        if self.mark == 0xFF:
+            self.mark = 0x12 if self.font == 0 else 0xC3
+        target = self.eval("the target")
+        h, v = self.loc if self.loc else (0, 0)
+        if not self.loc:
+            if b"field" in target or b"button" in target:
+                r = self.eval("item 1 to 2 of rect of the target").split(b",")
+                if len(r) >= 2 and _fhp_is_int(r[0]) and _fhp_is_int(r[1]):
+                    h, v = _fhp_num(r[0]), _fhp_num(r[1])
+            else:
+                try:
+                    mh, mv = (int(x) for x in str(self.it.host.mouse_loc()).split(","))
+                except Exception:  # noqa: BLE001
+                    mh, mv = 0, 0
+                h, v = mh - self.size // 2, mv - 10
+        self.target_text = b"@#&\xc0"
+        if self.sel == 0x7FFF:
+            if b"field" in target:
+                self.target_text = self.eval("item 1 of line 1 of target")
+            elif b"button" in target:
+                self.target_text = self.eval("short name of the target")
+        if self.ver == 5:
+            self.target_text = self.target_text.replace(b"-", b"\xd0")
+        elif self.ver >= 6 and self.target_text[:1] == b"-":
+            self.target_text = b"\xd0" + self.target_text[1:]
+        t = a[0].replace("\n", "\r").encode("mac_roman", "replace").split(b"\0")[0]
+        t = t.rstrip(b"\r")
+        main = self.menus[128] = _MacMenu(128)
+        if len(t) == 4:
+            names = res_menu_names(t.decode("mac_roman"), _all_resources(self.it))
+            main.insert_names(names)
+            if not main.count():
+                raise _FullHPopError("No such resource")
+            if self.sel == 0x7FFF:
+                k = 0
+                while True:
+                    k += 1
+                    same = self.text(main, k).lower() == self.target_text.lower()
+                    if same or k >= main.count():
+                        break
+                if same:
+                    self.sel = k
+                    main.set(k, 3, self.mark)
+        else:
+            self.build(main, t)
+        if self.sel == 0x7FFF:
+            self.sel = 0
+        if not self.it.host.mouse_is_down():
+            return None
+        m, n, enabled = main.select(self.it, self.menus, h, v)
+        if not (enabled or self.sub_owner) or n <= 0:
+            return None
+        if not (n > 31 or m.flags >> n & 1):
+            return None
+        return self.result(m, n)
+
+    def result(self, m, n):
+        main = self.menus[128]
+        t1, n1, s, sn = self.text(m, n), b"%d" % n, b"", b""
+        if m.id != 128:
+            s, sn = t1, n1
+            for k in range(1, main.count() + 1):
+                e = main.item(k)
+                if (e[3] if e[2] == 0x1B else e[2]) == m.id:
+                    t1, n1 = e[0], b"%d" % k
+                    break
+        w1, w2 = b"%d" % self.width(t1), b"%d" % self.width(s)
+
+        def plain(x):
+            if self.ver < 6:
+                x = x.replace(b"\xd0", b"-")
+                return x.replace(b",", b"\xd5") if self.ver == 5 else x
+            x = b"".join(b"[%d]" % c if c in (0, 0x2C) else bytes([c]) for c in x)[:255]
+            return b"-" + x[1:] if x[:1] == b"\xd0" else x
+        out = b",".join([plain(t1), plain(s), n1, sn]) + b"\r" + w1 + b"," + w2
+        return out[:255].decode("mac_roman").replace("\r", "\n")
+
+
+def _h_pop_up_menu_counted(it, a):
+    """The HPopupMenu(items, checkedItem, top, left) with no strings (6.2K,
+    in HyprStat and TestIt!): items end at ",", ";" or return, and the
+    items after a comma, up to the end of the line, are the submenu of
+    the one before it. The scan skips the very first character, empty
+    items aren't added but are counted, and the count is the submenu's
+    menu id and the item it is attached to. Answers "item,1" for an item
+    of the menu, "submenu,item+1" for one of a submenu, or "0"; anything
+    but exactly 4 parameters answers "0"."""
+    a = [str(x) for x in a]
+    if len(a) != 4:
+        return "0"
+    t = a[0].encode("mac_roman", "replace").replace(b"\n", b"\r") + b"\0"
+    item = _param_num(a[1])
+    v, h = _param_num(a[2]), _param_num(a[3])
+    main = _MacMenu(235)
+    menus = {235: main}
+    ends = b"\0\r,;"
+    p = seg = count = 0
+    while t[p]:
+        p += 1
+        if t[p] not in ends:
+            continue
+        if p > seg:
+            main.insert(t[seg:p][:255])
+        count += 1
+        seg = p + 1
+        if count < 235 and t[p] == 0x2C:
+            sub = _MacMenu(count)
+            main.set(count, 2, 0x1B)
+            main.set(count, 3, count)
+            while True:
+                p += 1
+                if t[p] in ends:
+                    if p > seg:
+                        sub.insert(t[seg:p][:255])
+                    seg = p + 1
+                if t[p] in b"\0\r;":
+                    break
+            menus[count] = sub
+    main.set(item, 3, 0x12)
+    m, n, enabled = main.select(it, menus, h, v)
+    if n == 0 or not enabled:
+        return "0"
+    return "%d,1" % n if m is main else "%d,%d" % (m.id, n + 1)
+
+
+def _h_pop_up_menu_lines(it, a):
+    """The small HPopupMenu(lines, popUpItem, top, left) (2294 bytes, in
+    Sunrise-set): the items of line 1 (comma-separated, AppendMenu's
+    metacharacters work) are the menu and line k+1 is the submenu of item
+    k (up to 50 lines). Answers "submenu,item" (submenu 0 for the menu
+    itself), "0,0" for nothing. No checks at all: the mouse need not be
+    down and popUpItem only places the menu."""
+    a = [str(x) for x in a]
+    t = a[0].encode("mac_roman", "replace").replace(b"\n", b"\r") if a else b""
+    if not t:
+        return "0,0"
+    v, h = _string_to_num(_arg(a, 2, "").encode("mac_roman", "replace")), \
+        _string_to_num(_arg(a, 3, "").encode("mac_roman", "replace"))
+    lines = t.split(b"\r")[:50]
+    menus = [_MacMenu(128 + k) for k in range(len(lines))]
+    for k, ln in enumerate(lines):
+        if k and not b"\r".join(lines[k:]):
+            break       # nothing after the last return
+        pos = 0
+        while True:
+            chunk = ln[pos:pos + 255]
+            n, last = len(chunk), len(chunk) < 251
+            if not last:    # a long line goes in pieces, cut at a comma
+                j = 250
+                while j > 0 and chunk[j - 1] != 0x2C:
+                    j -= 1
+                n = j - 1
+            if n < 1:
+                break
+            menus[k].insert(chunk[:n].replace(b",", b";"))
+            pos += n + 1
+            if last:
+                break
+    main = menus[0]
+    for k in range(1, len(menus)):
+        if menus[k].count():
+            main.set(k, 2, 0x1B)
+            main.set(k, 3, 128 + k)
+    m, n, enabled = main.select(it, {x.id: x for x in menus}, h, v)
+    if n == 0 or not enabled:
+        return "0,0"
+    return "%d,%d" % (m.id - 128, n)
+
+
 @xfcn("HPopUpMenu", "FullHPop")
 def h_pop_up_menu(it, a):
     """HPopUpMenu(items, checkedItem, top, left) pops up a menu with the given
     items (lines, or one line of comma-separated items) with its top-left
     corner at left,top and returns "item text,,item number", or empty if
     nothing was chosen. A menu resource id as items isn't supported."""
+    import zlib
     for name in ("HPopUpMenu", "FullHPop"):
         code = _ext_code(it, name)
         if code:
             if b"Jon Pugh" in code:
                 return _h_pop_up_menu_pugh(it, a, code)
+            if b"Usage: HPopupMenu choices" in code:
+                return _h_pop_up_menu_choices(it, a, code)
+            if b"Insufficient Parameters" in code:
+                return _h_pop_up_menu_choices(it, a, code, early=True)
+            if b"APPENDALLMENUITEMS" in code:
+                return _h_pop_up_menu_lines(it, a)
+            if zlib.crc32(code) in (0xCD6999AD, 0x0913BDB5):
+                return _h_pop_up_menu_counted(it, a)
+            if b"FullHPop(<menu>" in code:
+                return _FullHPop(it, a, code).run()
             break
     src = str(_arg(a, 0))
     if ht.is_number(src):

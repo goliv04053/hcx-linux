@@ -311,13 +311,18 @@ def install(tb_trap):
             m.w32(0xB54, mid << 16)     # MenuDisable: released over no item of this menu
             return tb.ret32(0)
         line, sub = r
-        enabled = items[line - 1]["enabled"]
+        enabled = items[line - 1]["enabled"] and not subs[line - 1]   # an item with a submenu can't be chosen
         if sub and 1 <= sub <= len(subs[line - 1]):
             mh, line = subs[line - 1][sub - 1]
             mid = struct.unpack(">H", _data(tb, mh)[:2])[0]
             enabled = menu_items(tb, mh)[0][line - 1]["enabled"]
         m.w32(0xB54, (mid << 16) | line)
         tb.ret32((mid << 16) | line if enabled else 0)  # a disabled item: 0, and it is in MenuDisable
+
+    @trap(0xAA66)
+    def _menu_choice(tb, op):
+        """MenuChoice: the item last released over, as MenuDisable keeps it."""
+        tb.ret32(tb.m.r32(0xB54))
 
     for num, size in {0xA938: 2, 0xA937: 0, 0xA94C: 2, 0xA934: 0}.items():   # HiliteMenu DrawMenuBar ...
         tb_trap(num)(_skip(size))

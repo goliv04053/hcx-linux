@@ -1491,6 +1491,15 @@ def _get_port(tb, op):
     tb.m.w32(p, _port(tb))
 
 
+@tb_trap(0xA910)
+@tb_trap(0xAA48)
+def _get_wmgr_port(tb, op):
+    """GetWMgrPort and GetCWMgrPort: the Window Manager's port is the whole
+    screen; the current port (the card window's) stands in for it."""
+    p = tb.m.pop32()
+    tb.m.w32(p, _port(tb))
+
+
 @tb_trap(0xA873)
 def _set_port(tb, op):
     port = tb.m.pop32()

@@ -9,7 +9,8 @@ externals; HCX itself never runs 68k code.
   python3 -m tools.xemu.compare FILE STACK --dump NAME CODE.bin
 
 FILE is anything HCX opens (a stack, an archive, a disk image); STACK is
-the name of a stack inside it. CASES.json is a list of [NAME, [PARAM...]],
+the name of a stack inside it. CASES.json is a list of [NAME, [PARAM...]]
+or [NAME, [PARAM...], {"replies": [...], "clip": "text", "mouse": true}],
 or {"files": {"HD:Folder:File": "text", "HD:Empty:": null}, "cases": [...]}
 to put files in the sandbox first (both sides see the same files; each
 case starts from a fresh copy). A file can also be {"text": "...",
@@ -349,14 +350,17 @@ def main(argv):
     else:
         cases = [(argv[2], argv[3:])]
     bad = 0
-    for name, params in cases:
+    for case in cases:
+        name, params = case[0], case[1]
+        opts = case[2] if len(case) > 2 else {}
         hits = [r for r in ext if r[2].lower() == name.lower()]
         if not hits:
             print("? %s: not in this stack" % name)
             bad += 1
             continue
         t, _i, n, d = hits[0]
-        bad += not compare(h, n, t, d, [str(p) for p in params], files)
+        bad += not compare(h, n, t, d, [str(p) for p in params], files, opts.get("replies"),
+                           opts.get("clip", ""), opts.get("mouse", False))
     return 1 if bad else 0
 
 
